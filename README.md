@@ -4,11 +4,15 @@
 
 This repo is part of a larger project **GraphRAG Demo**, in which I show how the GraphRAG pattern works. 
 
-**Part 1** is a basic Data Pipeline made with **Dagster**, which orchestrates the data ingestion from multiple sources for making a knowledge graph (in **Neo4j** graph database) and preparing unstructured data for a RAG system. This app is ready to be deployed on the cloud in a Docker container.
+Part 1 is a basic Data Pipeline made with **Dagster**, which orchestrates the data ingestion from multiple sources for making a knowledge graph (in **Neo4j** graph database) and preparing unstructured data for a RAG system. This app is ready to be deployed on the cloud in a Docker container.
+
+## Domain: Electronic Music
+
+This pipeline is specifically tuned for the **Electronic Music** domain. It captures the rich, interconnected history of electronic artists, from early pioneers to contemporary producers. The dataset encompasses a wide range of sub-genres—including Techno, House, Ambient, IDM, and Drum & Bass—modeling the complex relationships between artists, their releases, and the evolving taxonomy of electronic musical styles.
 
 ## About the Project
 
-This ETL pipeline orchestrates data ingestion from multiple sources to build a rich dataset of music artists:
+This data pipeline orchestrates data ingestion from multiple sources to build a rich dataset of music artists:
 
 - **Wikidata API** (using SPARQL)
 - **Wikipedia API**
@@ -19,17 +23,17 @@ The goal is to prepare unstructured data (Wikipedia articles of musicians, bands
 1.  **Semantic Search:** Preparing text chunks for vectorization.
 2.  **Deterministic Search:** Using **Neo4j** (Graph Database).
 
-We leverage **Polars** for high-performance data transformation, **dlt** (Data Load Tool) for handling schema evolution, and **Pydantic** for rigorous data validation.
+We leverage **Polars** for high-performance data transformation and **Pydantic** for rigorous data validation.
 
 ## Tech Stack
 
 - **Orchestration:** [Dagster](https://dagster.io/) (with GCP integration)
-- **Graph Database:** [Neo4j](https://neo4j.com/)
+- **Databases:** [Neo4j](https://neo4j.com/) (Graph), [ChromaDB](https://www.trychroma.com/) (Vector)
 - **Data Engineering:** [Polars](https://pola.rs/) (manipulation), [Msgspec](https://github.com/jcrist/msgspec) (serialization), [Ftfy](https://github.com/rspeer/python-ftfy) (cleaning)
-- **Data Validation & Config:** [Pydantic](https://pydantic.dev/), Pydantic Settings
-- **AI & ML:** [PyTorch](https://pytorch.org/), [Transformers](https://huggingface.co/docs/transformers/index), Nomic, LangChain Text Splitters, Einops
-- **Networking & Utils:** [HTTPX](https://www.python-httpx.org/) (Async), Structlog, Tqdm
-- **Language & Tooling:** Python 3.13+, uv, Ruff, Ty, Bandit
+- **Data Validation & Config:** [Pydantic](https://pydantic.dev/), [Pydantic Settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/)
+- **AI & ML:** [PyTorch](https://pytorch.org/), [Transformers](https://huggingface.co/docs/transformers/index), [Nomic](https://atlas.nomic.ai/) (Embeddings), [LangChain](https://www.langchain.com/) (Text Splitters), [Einops](https://einops.rocks/)
+- **Networking & Utils:** [HTTPX](https://www.python-httpx.org/) (Async), [Structlog](https://www.structlog.org/), [Tqdm](https://tqdm.github.io/)
+- **Language & Tooling:** [Python 3.13+](https://www.python.org/), [uv](https://docs.astral.sh/uv/), [Ruff](https://docs.astral.sh/ruff/), [Ty](https://github.com/astral-sh/ty), [Bandit](https://bandit.readthedocs.io/)
 
 ## Data Architecture
 
@@ -85,6 +89,16 @@ We construct a deterministic Knowledge Graph to map the relationships between th
 - **Articles:** ~5,337 processed.
 - **Nodes:** ~47,449 (Artists, Albums, Tracks, Genres).
 - **Edges:** ~88,535.
+
+### 3. Vector Database (Chroma)
+
+To enable semantic search, the processed text chunks are indexed in **ChromaDB**.
+
+- **Collection Name:** `music_rag_collection`
+- **Embedding Model:** `nomic-embed-text-v1.5` (via Nomic AI)
+- **Distance Metric:** Cosine Similarity
+
+The `wikipedia_articles.jsonl` dataset serves as the source of truth. A specialized ingestion process (conceptually part of the RAG pipeline) reads these files, generates embeddings using the Nomic model, and upserts them into the vector store. This allows for natural language queries like "Which electronic artists were influenced by 80s synth-pop?".
 
 ## Getting Started
 
