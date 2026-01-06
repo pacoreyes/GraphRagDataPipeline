@@ -143,9 +143,9 @@ def clean_wikipedia_text(text: str) -> str:
         "== References ==",
         "== External links ==",
         "== See also ==",
-        "== Further reading ==",
-        "== Notes ==",
-        "== Discography ==", # Optional: Discographies can be long lists, might dilute semantic search? 
+        # "== Further reading ==",
+        # "== Notes ==",
+        # "== Discography ==", # Optional: Discographies can be long lists, might dilute semantic search?
                             # Keeping Discography might be useful for "albums by..." queries. 
                             # Leaving Discography IN for now as it's relevant content.
     ]

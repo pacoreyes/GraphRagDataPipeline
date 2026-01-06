@@ -10,18 +10,15 @@ dependencies = [
     "structlog",  # Structured logging
     "msgspec",  # High-performance serialization
     "httpx",  # Async/Sync HTTP client
-    "opentelemetry-api",  # Observability
-    "opentelemetry-sdk",  # Observability
+    "tqdm",  # Progress bars
     "ftfy", # Text cleaning
-    "wikipedia-api", # Wikipedia API
     "langchain-text-splitters",  # Text splitter used in embeddings
     "chromadb>=0.6.0",  #  Chroma, vector database
     "torch",  # PyTorch, deep learning library
     "transformers",  # HuggingFace transformers library
     "einops",  # For tensor operations
-    "sentence_transformers",  # Embedding model
     "nomic",  # Embedding model (Nomic AI)
-    "gqlalchemy",  # Memgraph, graph database
+    "neo4j",  # Neo4j graph database driver
     "dagster_gcp",  # Dagster integration with GCP
 ]
 

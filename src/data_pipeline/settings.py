@@ -149,11 +149,12 @@ class Settings(BaseSettings):
     LASTFM_RATE_LIMIT_DELAY: int = 1
 
     # ==============================================================================
-    # MEMGRAPH CONFIGURATION
+    # NEO4J CONFIGURATION
     # ==============================================================================
-    MEMGRAPH_HOST: str = "127.0.0.1"
-    MEMGRAPH_PORT: int = 7687
-    MEMGRAPH_INGESTION_BATCH_SIZE: int = 1000
+    NEO4J_URI: str
+    NEO4J_USERNAME: str
+    NEO4J_PASSWORD: str
+    GRAPH_DB_INGESTION_BATCH_SIZE: int = 1000
 
     # ==============================================================================
     #  AUTO-CREATION DIRS
