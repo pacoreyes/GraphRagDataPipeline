@@ -8,58 +8,46 @@
 # -----------------------------------------------------------
 
 import pytest
-from unittest.mock import patch
-from pathlib import Path
+import httpx
+from unittest.mock import patch, MagicMock
 import polars as pl
 from dagster import build_asset_context
 
 from data_pipeline.defs.assets.extract_genres import extract_genres
 
 @pytest.mark.asyncio
-@patch("pathlib.Path.exists")
-@patch("data_pipeline.defs.assets.extract_genres.stream_to_jsonl")
 @patch("data_pipeline.defs.assets.extract_genres.fetch_sparql_query_async")
 @patch("data_pipeline.defs.assets.extract_genres.async_fetch_wikidata_entities_batch")
-@patch("data_pipeline.defs.assets.extract_genres.pl.read_ndjson")
 @patch("data_pipeline.defs.assets.extract_genres.settings")
 async def test_extract_genres(
     mock_settings,
-    mock_read_ndjson,
     mock_fetch_entities,
-    mock_fetch_sparql,
-    mock_stream,
-    mock_exists
+    mock_fetch_sparql
 ):
     """
     Test the extract_genres asset.
     """
-    mock_exists.return_value = True
     # Setup mock settings
-    mock_settings.artists_filepath = Path("/tmp/datasets/artists.jsonl")
-    mock_settings.albums_filepath = Path("/tmp/datasets/albums.jsonl")
-    mock_settings.tracks_filepath = Path("/tmp/datasets/tracks.jsonl")
-    mock_settings.genres_filepath = Path("/tmp/datasets/genres.jsonl")
     mock_settings.WIKIDATA_ACTION_BATCH_SIZE = 10
     mock_settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT = 10
     mock_settings.WIKIDATA_CONCURRENT_REQUESTS = 2
 
-    # Mock Artists Data (Source)
-    # 3 artists, overlapping genres
-    mock_df = pl.DataFrame({
-        "id": ["Q1", "Q2", "Q3"],
-        "genres": [
-            ["Q101", "Q102"],  # Artist 1
-            ["Q102", "Q103"],  # Artist 2 (Overlap Q102)
-            ["Q104"]           # Artist 3
-        ]
+    # Mock Input DataFrames
+    mock_artists_df = pl.DataFrame({
+        "genres": [["Q101", "Q102"]]
     })
-    # read_ndjson is called 3 times (artists, albums, tracks), returning same mock is fine for this test
-    mock_read_ndjson.return_value = mock_df
+    mock_albums_df = pl.DataFrame({
+        "genres": [["Q102", "Q103"]]
+    })
+    mock_tracks_df = pl.DataFrame({
+        "genres": [["Q104"]]
+    })
 
     # Unique Genres Expected: Q101, Q102, Q103, Q104
     
-    # Mock Context
+    # Mock Context and Resource
     context = build_asset_context()
+    mock_client = MagicMock(spec=httpx.AsyncClient)
 
     # Configure for batching test
     mock_settings.WIKIDATA_ACTION_BATCH_SIZE = 2
@@ -79,18 +67,11 @@ async def test_extract_genres(
     mock_fetch_sparql.return_value = [] # No parents for now
 
     # Execution
-    result = await extract_genres(context)
+    result_df = await extract_genres(context, mock_client, mock_artists_df, mock_albums_df, mock_tracks_df)
 
     # Assertions
-    assert result == Path("/tmp/datasets/genres.jsonl")
-
-    # Verify stream_to_jsonl calls
-    mock_stream.assert_called_once()
-    
-    # Collect written items
-    generator = mock_stream.call_args[0][0]
-    written_genres = [g async for g in generator]
-    written_ids = [g.id for g in written_genres]
+    assert isinstance(result_df, pl.DataFrame)
+    written_ids = result_df["id"].to_list()
     
     assert "Q101" in written_ids
     assert "Q102" in written_ids
@@ -98,6 +79,6 @@ async def test_extract_genres(
     assert "Q104" in written_ids
     
     # Check content of one
-    genre_a = next(g for g in written_genres if g.id == "Q101")
-    assert genre_a.name == "Genre A"
-    assert genre_a.aliases == ["Alias A1"]
+    genre_a = result_df.filter(pl.col("id") == "Q101").to_dicts()[0]
+    assert genre_a["name"] == "Genre A"
+    assert genre_a["aliases"] == ["Alias A1"]

@@ -11,7 +11,6 @@
 Wikidata helpers
 """
 import asyncio
-import json
 from pathlib import Path
 from typing import Any, Callable, Optional, Dict, List
 
@@ -31,82 +30,83 @@ WIKIDATA_CACHE_DIR = settings.wikidata_cache_dirpath
 
 def execute_sparql_extraction(
     context: AssetExecutionContext,
-    output_path: Path,
     get_query_function: Callable[..., str],
     record_processor: Callable[[dict[str, Any]], Optional[dict[str, Any]]],
     label: str,
+    client: Optional[httpx.AsyncClient] = None,
     **query_params: Any,
-) -> None:
+) -> list[dict[str, Any]]:
     """
-    Orchestrates fetching, processing, and saving data from a SPARQL endpoint.
+    Orchestrates fetching and processing data from a SPARQL endpoint.
+    Returns a list of processed records.
     """
-    asyncio.run(
-        _run_extraction_pipeline(
+    return asyncio.run(
+        run_extraction_pipeline(
             context=context,
-            output_path=output_path,
             get_query_function=get_query_function,
             record_processor=record_processor,
             label=label,
+            client=client,
             **query_params,
         )
     )
 
 
-async def _run_extraction_pipeline(
+async def run_extraction_pipeline(
     context: AssetExecutionContext,
-    output_path: Path,
     get_query_function: Callable[..., str],
     record_processor: Callable[[dict[str, Any]], Optional[dict[str, Any]]],
     label: str,
+    client: Optional[httpx.AsyncClient] = None,
     **query_params: Any,
-) -> None:
+) -> list[dict[str, Any]]:
     """
     Internal async function to run the extraction pipeline using concurrent pagination.
+    Returns a list of processed records.
     """
     batch_size = settings.WIKIDATA_SPARQL_BATCH_SIZE
     concurrency_limit = settings.WIKIDATA_CONCURRENT_REQUESTS
     current_offset = 0
-    total_written = 0
+    all_records = []
     has_more_data = True
 
     context.log.info(f"Starting extraction for {label}...")
 
-    with JSONLWriter(output_path) as writer:
-        while has_more_data:
-            offsets_batch = [
-                current_offset + (i * batch_size) for i in range(concurrency_limit)
-            ]
+    while has_more_data:
+        offsets_batch = [
+            current_offset + (i * batch_size) for i in range(concurrency_limit)
+        ]
 
-            async def process_offset(offset: int) -> list[dict[str, Any]]:
-                query = get_query_function(
-                    **query_params, limit=batch_size, offset=offset
-                )
-                return await fetch_sparql_query_async(context, query)
-
-            results_batches = await run_tasks_concurrently(
-                items=offsets_batch,
-                processor=process_offset,
-                concurrency_limit=concurrency_limit,
-                description=f"Fetching {label} (offsets {offsets_batch[0]}..{offsets_batch[-1]})",
+        async def process_offset(offset: int) -> list[dict[str, Any]]:
+            query = get_query_function(
+                **query_params, limit=batch_size, offset=offset
             )
+            return await fetch_sparql_query_async(context, query, client=client)
 
-            batch_has_partial_page = False
-            for results in results_batches:
-                if len(results) < batch_size:
-                    batch_has_partial_page = True
+        results_batches = await run_tasks_concurrently(
+            items=offsets_batch,
+            processor=process_offset,
+            concurrency_limit=concurrency_limit,
+            description=f"Fetching {label} (offsets {offsets_batch[0]}..{offsets_batch[-1]})",
+        )
 
-                for item in results:
-                    processed_record = record_processor(item)
-                    if processed_record:
-                        writer.write(processed_record)
-                        total_written += 1
-            
-            if batch_has_partial_page:
-                has_more_data = False
-            else:
-                current_offset += (batch_size * concurrency_limit)
+        batch_has_partial_page = False
+        for results in results_batches:
+            if len(results) < batch_size:
+                batch_has_partial_page = True
 
-    context.log.info(f"Total records stored in {output_path.name}: {total_written}")
+            for item in results:
+                processed_record = record_processor(item)
+                if processed_record:
+                    all_records.append(processed_record)
+        
+        if batch_has_partial_page:
+            has_more_data = False
+        else:
+            current_offset += (batch_size * concurrency_limit)
+
+    context.log.info(f"Total records fetched for {label}: {len(all_records)}")
+    return all_records
 
 
 async def fetch_sparql_query_async(

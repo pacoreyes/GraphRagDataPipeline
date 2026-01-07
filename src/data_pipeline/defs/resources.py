@@ -8,17 +8,19 @@
 # -----------------------------------------------------------
 
 import os
-from typing import Any
+from contextlib import contextmanager, asynccontextmanager
+from typing import Any, AsyncGenerator, Generator
 
+import httpx
 from dagster import (
     ConfigurableResource,
     Definitions,
     EnvVar,
-    FilesystemIOManager,
 )
-from dagster_gcp import GCSPickleIOManager, GCSResource
+from neo4j import GraphDatabase, Driver
 
 from data_pipeline.settings import settings
+from .io_managers import PolarsJSONLIOManager
 
 
 class ApiConfiguration(ConfigurableResource):
@@ -29,6 +31,39 @@ class ApiConfiguration(ConfigurableResource):
     nomic_api_key: str
 
 
+class Neo4jResource(ConfigurableResource):
+    """
+    Resource for interacting with the Neo4j graph database.
+    """
+    uri: str = EnvVar("NEO4J_URI")
+    username: str = EnvVar("NEO4J_USERNAME")
+    password: str = EnvVar("NEO4J_PASSWORD")
+
+    @contextmanager
+    def yield_for_execution(self, context) -> Generator[Driver, None, None]:
+        driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password))
+        try:
+            yield driver
+        finally:
+            driver.close()
+
+
+class WikidataResource(ConfigurableResource):
+    """
+    Resource for making HTTP requests to Wikidata (SPARQL).
+    """
+    user_agent: str = "DagsterDataPipeline/1.0 (mailto:pacoreyes@protonmail.com)"
+    timeout: int = 60
+
+    @asynccontextmanager
+    async def yield_for_execution(self, context) -> AsyncGenerator[httpx.AsyncClient, None]:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": self.user_agent},
+            timeout=self.timeout
+        ) as client:
+            yield client
+
+
 # Environment Logic
 is_prod = os.getenv("DAGSTER_ENV") == "PROD"
 
@@ -37,21 +72,11 @@ resource_defs: dict[str, Any] = {
     "api_config": ApiConfiguration(
         lastfm_api_key=EnvVar("LASTFM_API_KEY"),
         nomic_api_key=EnvVar("NOMIC_API_KEY"),
-    )
+    ),
+    "neo4j": Neo4jResource(),
+    "wikidata": WikidataResource(),
+    "io_manager": PolarsJSONLIOManager(base_dir=str(settings.datasets_dirpath))
 }
-
-if is_prod:
-    # PROD: run on Docker, save to GCS
-    resource_defs["io_manager"] = GCSPickleIOManager(
-        gcs_bucket="graphrag_data_lakehouse",
-        gcs_prefix="dagster_data",
-        gcs=GCSResource()
-    )
-else:
-    # DEV: Save to Local Disk
-    resource_defs["io_manager"] = FilesystemIOManager(
-        base_dir=str(settings.temp_dirpath)
-    )
 
 # Export as Definitions for automatic loading
 defs = Definitions(

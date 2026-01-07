@@ -1,6 +1,6 @@
 # -----------------------------------------------------------
 # Erase Graph DB Script
-# Dagster Data pipeline for Structured and Unstructured Data
+# Standalone Script for Erasing Neo4j Database
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License

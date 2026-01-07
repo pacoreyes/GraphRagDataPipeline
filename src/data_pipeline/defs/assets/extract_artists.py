@@ -7,23 +7,22 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from pathlib import Path
 from typing import Any, Optional
 
 import httpx
+import msgspec
 import polars as pl
 from dagster import asset, AssetExecutionContext
 
 from data_pipeline.models import Artist
 from data_pipeline.settings import settings
-from data_pipeline.utils.io_helpers import stream_to_jsonl, deduplicate_stream
+from data_pipeline.utils.io_helpers import deduplicate_stream
 from data_pipeline.utils.lastfm_helpers import (
     async_get_artist_info_with_fallback,
     parse_lastfm_similar_artists,
     parse_lastfm_tags,
 )
 from data_pipeline.utils.network_helpers import (
-    process_batches_concurrently,
     run_tasks_concurrently,
     yield_batches_concurrently,
 )
@@ -34,9 +33,9 @@ from data_pipeline.utils.wikidata_helpers import (
     extract_wikidata_claim_value,
     extract_wikidata_country_id,
     extract_wikidata_genre_ids,
-    extract_wikidata_wikipedia_url,
 )
 from data_pipeline.utils.transformation_helpers import normalize_and_clean_text
+from data_pipeline.defs.resources import WikidataResource, ApiConfiguration
 
 
 async def _enrich_artist_batch(
@@ -163,22 +162,24 @@ async def _enrich_artist_batch(
 
 @asset(
     name="extract_artists",
-    deps=["build_artist_index"],
     description="Enrich artists with Wikidata and Last.fm data.",
-    required_resource_keys={"api_config"},
 )
-async def extract_artist(context: AssetExecutionContext) -> Path:
+async def extract_artist(
+    context: AssetExecutionContext, 
+    wikidata: WikidataResource, 
+    api_config: ApiConfiguration,
+    build_artist_index: pl.DataFrame
+) -> pl.DataFrame:
     """
-    Loads artists from the index, enriches them, and saves to artists.jsonl.
+    Enriches all artists from the merged index.
     """
-    context.log.info("Starting artist enrichment.")
+    context.log.info("Starting artist enrichment for full index.")
 
-    api_key = context.resources.api_config.lastfm_api_key
+    api_key = api_config.lastfm_api_key
     api_url = settings.LASTFM_API_URL
 
-    # Load Data
-    df = pl.read_ndjson(settings.artist_index_filepath)
-    artists_list = df.to_dicts()
+    # Use input DataFrame directly
+    artists_list = build_artist_index.to_dicts()
 
     # Wrap the processor to match signature
     async def process_batch_wrapper(
@@ -194,13 +195,20 @@ async def extract_artist(context: AssetExecutionContext) -> Path:
         concurrency_limit=1,  # Sequential batches to respect Last.fm limits inside
         description="Processing Artist Batches",
         timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
+        client=wikidata,
     )
 
-    # Save results
-    await stream_to_jsonl(
-        deduplicate_stream(artist_stream, key_attr="id"),
-        settings.artists_filepath
-    )
+    # Collect results
+    context.log.info("Collecting enriched artists.")
+    enriched_artists = [
+        msgspec.to_builtins(a) 
+        async for a in deduplicate_stream(artist_stream, key_attr="id")
+    ]
 
-    context.log.info(f"Saved enriched artists to {settings.artists_filepath}")
-    return settings.artists_filepath
+    context.log.info(f"Enriched {len(enriched_artists)} artists.")
+    
+    context.add_output_metadata({
+        "artist_count": len(enriched_artists)
+    })
+    
+    return pl.DataFrame(enriched_artists)

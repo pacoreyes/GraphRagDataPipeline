@@ -7,16 +7,15 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from pathlib import Path
 from collections import defaultdict
 
 import httpx
+import msgspec
 import polars as pl
 from dagster import asset, AssetExecutionContext
 
 from data_pipeline.models import Genre
 from data_pipeline.settings import settings
-from data_pipeline.utils.io_helpers import stream_to_jsonl
 from data_pipeline.utils.network_helpers import yield_batches_concurrently
 from data_pipeline.utils.transformation_helpers import extract_unique_ids_from_column, normalize_and_clean_text
 from data_pipeline.utils.sparql_queries import get_genre_parents_batch_query
@@ -27,40 +26,39 @@ from data_pipeline.utils.wikidata_helpers import (
     fetch_sparql_query_async,
     get_sparql_binding_value,
 )
+from data_pipeline.defs.resources import WikidataResource
 
 
 @asset(
     name="extract_genres",
-    deps=["extract_tracks"],
-    description="Extract Genres dataset genres.jsonl from artists, albums and tracks",
+    description="Extract Genres dataset from artists, albums and tracks",
 )
-async def extract_genres(context: AssetExecutionContext) -> Path:
+async def extract_genres(
+    context: AssetExecutionContext, 
+    wikidata: WikidataResource,
+    extract_artists: pl.DataFrame,
+    extract_albums: pl.DataFrame,
+    extract_tracks: pl.DataFrame
+) -> pl.DataFrame:
     """
     Extracts all unique music genre IDs from artists, albums, and tracks,
-    fetches their English labels, aliases, and parents from Wikidata,
-    and saves the results to a JSONL file.
+    fetches their English labels, aliases, and parents from Wikidata.
+    Returns a Polars DataFrame.
     """
     context.log.info("Starting genre extraction from artists, albums, and tracks.")
 
-    # 1. Read datasets and extract unique genre IDs
+    # 1. Read input DataFrames and extract unique genre IDs
     genre_ids = set()
-    schema_overrides = {"genres": pl.List(pl.String)}
-
-    for filepath in [settings.artists_filepath, settings.albums_filepath, settings.tracks_filepath]:
-        try:
-            if filepath.exists():
-                df = pl.read_ndjson(filepath, schema_overrides=schema_overrides)
-                genre_ids.update(extract_unique_ids_from_column(df, "genres"))
-        except Exception as e:
-            context.log.warning(f"Could not read {filepath}: {e}")
+    
+    for df in [extract_artists, extract_albums, extract_tracks]:
+        genre_ids.update(extract_unique_ids_from_column(df, "genres"))
 
     unique_genre_ids = sorted(list(genre_ids))
     context.log.info(f"Found {len(unique_genre_ids)} unique genre IDs.")
 
     if not unique_genre_ids:
-        context.log.warning("No genre IDs found. Creating empty file.")
-        await stream_to_jsonl([], settings.genres_filepath)
-        return settings.genres_filepath
+        context.log.warning("No genre IDs found. Returning empty DataFrame.")
+        return pl.DataFrame()
 
     # 2. Define combined worker function
     async def process_batch_combined(
@@ -102,17 +100,19 @@ async def extract_genres(context: AssetExecutionContext) -> Path:
 
         return batch_results
 
-    # 3. Stream processing and writing
+    # 3. Stream processing
     genre_stream = yield_batches_concurrently(
         items=unique_genre_ids,
         batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
         processor_fn=process_batch_combined,
         concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
         description="Fetching genre metadata and parents",
+        client=wikidata,
     )
     
-    # 4. Save results
-    await stream_to_jsonl(genre_stream, settings.genres_filepath)
-    context.log.info(f"Successfully processed genres.")
+    # 4. Collect results
+    context.log.info("Collecting genres.")
+    genres = [msgspec.to_builtins(g) async for g in genre_stream]
 
-    return settings.genres_filepath
+    context.log.info(f"Successfully fetched {len(genres)} genres.")
+    return pl.DataFrame(genres)

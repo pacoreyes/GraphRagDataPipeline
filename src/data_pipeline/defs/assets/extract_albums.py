@@ -7,16 +7,16 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from pathlib import Path
 from typing import Any
 
 import httpx
+import msgspec
 import polars as pl
 from dagster import asset, AssetExecutionContext
 
 from data_pipeline.models import Album
 from data_pipeline.settings import settings
-from data_pipeline.utils.io_helpers import stream_to_jsonl, deduplicate_stream
+from data_pipeline.utils.io_helpers import deduplicate_stream
 from data_pipeline.utils.network_helpers import yield_batches_concurrently
 from data_pipeline.utils.sparql_queries import get_albums_by_artists_batch_query
 from data_pipeline.utils.wikidata_helpers import (
@@ -24,31 +24,30 @@ from data_pipeline.utils.wikidata_helpers import (
     get_sparql_binding_value,
 )
 from data_pipeline.utils.transformation_helpers import normalize_and_clean_text
+from data_pipeline.defs.resources import WikidataResource
 
 
 @asset(
     name="extract_albums",
-    deps=["extract_artists"],
     description="Extract Albums dataset from the Artist list using Wikidata SPARQL.",
 )
-async def extract_albums(context: AssetExecutionContext) -> Path:
+async def extract_albums(
+    context: AssetExecutionContext, 
+    wikidata: WikidataResource, 
+    extract_artists: pl.DataFrame
+) -> pl.DataFrame:
     """
     Retrieves all albums for each artist in the artists dataset from Wikidata.
+    Returns a Polars DataFrame.
     """
     context.log.info("Starting album extraction from artists dataset.")
 
-    # 1. Load artists and extract QIDs
-    try:
-        df = pl.read_ndjson(settings.artists_filepath)
-        artist_qids = df["id"].to_list()
-    except Exception as e:
-        context.log.error(f"Could not read artists file: {e}")
-        raise e
+    # 1. Get QIDs from input DataFrame
+    artist_qids = extract_artists["id"].to_list()
 
     if not artist_qids:
-        context.log.warning("No artists found. Creating empty albums file.")
-        await stream_to_jsonl([], settings.albums_filepath)
-        return settings.albums_filepath
+        context.log.warning("No artists found. Returning empty DataFrame.")
+        return pl.DataFrame()
 
     context.log.info(f"Fetching albums for {len(artist_qids)} artists.")
 
@@ -123,7 +122,6 @@ async def extract_albums(context: AssetExecutionContext) -> Path:
                 if year is not None:
                     if existing.year is None or year < existing.year:
                         final_map[title_key] = new_album
-                # If years equal or new is None, keep existing (or arbitrary logic, keeping first encountered)
 
         return list(final_map.values())
 
@@ -135,16 +133,21 @@ async def extract_albums(context: AssetExecutionContext) -> Path:
         concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
         description="Fetching albums",
         timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
+        client=wikidata,
     )
 
-    # 4. Save results (Deduplicate globally by Title + Artist)
-    await stream_to_jsonl(
-        deduplicate_stream(album_stream, key_attr=["title", "artist_id"]),
-        settings.albums_filepath
-    )
+    # 4. Collect results (Deduplicate globally by Title + Artist)
+    context.log.info("Collecting and deduplicating albums.")
+    albums = [
+        msgspec.to_builtins(album) 
+        async for album in deduplicate_stream(album_stream, key_attr=["title", "artist_id"])
+    ]
 
-    context.log.info(
-        f"Successfully saved albums to {settings.albums_filepath}"
-    )
-
-    return settings.albums_filepath
+    context.log.info(f"Successfully fetched {len(albums)} albums.")
+    
+    context.add_output_metadata({
+        "album_count": len(albums),
+        "artist_count": len(artist_qids)
+    })
+    
+    return pl.DataFrame(albums)

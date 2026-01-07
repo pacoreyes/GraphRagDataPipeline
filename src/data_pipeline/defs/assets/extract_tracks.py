@@ -7,16 +7,16 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from pathlib import Path
 from typing import Any
 
 import httpx
+import msgspec
 import polars as pl
 from dagster import asset, AssetExecutionContext
 
 from data_pipeline.models import Track
 from data_pipeline.settings import settings
-from data_pipeline.utils.io_helpers import stream_to_jsonl, deduplicate_stream
+from data_pipeline.utils.io_helpers import deduplicate_stream
 from data_pipeline.utils.network_helpers import yield_batches_concurrently
 from data_pipeline.utils.sparql_queries import get_tracks_by_albums_batch_query
 from data_pipeline.utils.wikidata_helpers import (
@@ -24,34 +24,30 @@ from data_pipeline.utils.wikidata_helpers import (
     get_sparql_binding_value,
 )
 from data_pipeline.utils.transformation_helpers import normalize_and_clean_text
+from data_pipeline.defs.resources import WikidataResource
 
 
 @asset(
     name="extract_tracks",
-    deps=["extract_albums"],
     description="Extract Tracks dataset from the Albums list using Wikidata SPARQL.",
 )
-async def extract_tracks(context: AssetExecutionContext) -> Path:
+async def extract_tracks(
+    context: AssetExecutionContext, 
+    wikidata: WikidataResource, 
+    extract_albums: pl.DataFrame
+) -> pl.DataFrame:
     """
     Retrieves all tracks for each album in the albums dataset from Wikidata.
+    Returns a Polars DataFrame.
     """
     context.log.info("Starting track extraction from albums dataset.")
 
-    # 1. Load albums and extract QIDs
-    try:
-        # We need the Album ID to query, and we'll use it to link the tracks.
-        df = pl.read_ndjson(settings.albums_filepath)
-        album_qids = df["id"].to_list()
-    except Exception as e:
-        context.log.error(f"Could not read albums file: {e}")
-        # If albums file doesn't exist or is empty, we produce an empty tracks file
-        await stream_to_jsonl([], settings.tracks_filepath)
-        return settings.tracks_filepath
+    # 1. Get QIDs from input DataFrame
+    album_qids = extract_albums["id"].to_list()
 
     if not album_qids:
-        context.log.warning("No albums found. Creating empty tracks file.")
-        await stream_to_jsonl([], settings.tracks_filepath)
-        return settings.tracks_filepath
+        context.log.warning("No albums found. Returning empty DataFrame.")
+        return pl.DataFrame()
 
     context.log.info(f"Fetching tracks for {len(album_qids)} albums.")
 
@@ -108,16 +104,21 @@ async def extract_tracks(context: AssetExecutionContext) -> Path:
         concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
         description="Fetching tracks",
         timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
+        client=wikidata,
     )
 
-    # 4. Save results (Deduplicate globally by ID + AlbumID)
-    await stream_to_jsonl(
-        deduplicate_stream(track_stream, key_attr=["id", "album_id"]),
-        settings.tracks_filepath
-    )
+    # 4. Collect results (Deduplicate globally by ID + AlbumID)
+    context.log.info("Collecting and deduplicating tracks.")
+    tracks = [
+        msgspec.to_builtins(track) 
+        async for track in deduplicate_stream(track_stream, key_attr=["id", "album_id"])
+    ]
 
-    context.log.info(
-        f"Successfully saved tracks to {settings.tracks_filepath}"
-    )
-
-    return settings.tracks_filepath
+    context.log.info(f"Successfully fetched {len(tracks)} tracks.")
+    
+    context.add_output_metadata({
+        "track_count": len(tracks),
+        "album_count": len(album_qids)
+    })
+    
+    return pl.DataFrame(tracks)

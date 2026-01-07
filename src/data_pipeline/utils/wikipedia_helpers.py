@@ -139,17 +139,7 @@ def clean_wikipedia_text(text: str) -> str:
     # These headers usually appear on their own lines like "== References ==" or "==External links=="
     # We will look for the first occurrence of these and cut off everything after.
     # Common footer sections in English Wikipedia:
-    footer_headers = [
-        "== References ==",
-        "== External links ==",
-        "== See also ==",
-        # "== Further reading ==",
-        # "== Notes ==",
-        # "== Discography ==", # Optional: Discographies can be long lists, might dilute semantic search?
-                            # Keeping Discography might be useful for "albums by..." queries. 
-                            # Leaving Discography IN for now as it's relevant content.
-    ]
-
+    
     # Normalize headers to catch variations like "==References==" (no spaces)
     # The API 'explaintext' usually formats them as "== Header =="
     

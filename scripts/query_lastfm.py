@@ -1,6 +1,6 @@
 # -----------------------------------------------------------
 # Query Last.fm Script
-# Dagster Data pipeline for Structured and Unstructured Data
+# Standalone Script for Querying Last.fm API
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License

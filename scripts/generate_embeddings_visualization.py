@@ -1,6 +1,6 @@
 # -----------------------------------------------------------
 # Generate Embeddings Visualization Script
-# Dagster Data pipeline for Structured and Unstructured Data
+# Standalone Script for Vector Space Visualization
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License
@@ -17,6 +17,7 @@ visual, interactive map of the vector space.
 Usage:
     python -m scripts.visualize_chroma_db
 """
+
 
 import os
 from typing import Optional

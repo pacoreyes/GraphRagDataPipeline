@@ -8,54 +8,44 @@
 # -----------------------------------------------------------
 
 import pytest
-from unittest.mock import patch
-from pathlib import Path
+import httpx
+from unittest.mock import patch, MagicMock
 import polars as pl
 from dagster import build_asset_context
 
 from data_pipeline.defs.assets.extract_artists import extract_artist
-from data_pipeline.models import Artist
 from data_pipeline.defs.resources import ApiConfiguration
 
 @pytest.mark.asyncio
-@patch("data_pipeline.defs.assets.extract_artists.stream_to_jsonl")
 @patch("data_pipeline.defs.assets.extract_artists.async_get_artist_info_with_fallback")
 @patch("data_pipeline.defs.assets.extract_artists.async_resolve_qids_to_labels")
 @patch("data_pipeline.defs.assets.extract_artists.async_fetch_wikidata_entities_batch")
-@patch("data_pipeline.defs.assets.extract_artists.pl.read_ndjson")
 @patch("data_pipeline.defs.assets.extract_artists.settings")
 async def test_extract_artist(
     mock_settings,
-    mock_read_ndjson,
     mock_fetch_entities,
     mock_resolve_labels,
-    mock_lastfm,
-    mock_stream
+    mock_lastfm
 ):
     """
     Test the extract_artist asset.
     """
     # Setup mock settings
-    mock_settings.artist_index_filepath = Path("/tmp/dummy_artist_index.jsonl")
-    mock_settings.datasets_dirpath = Path("/tmp/datasets")
-    mock_settings.artists_filepath = Path("/tmp/datasets/artists.jsonl")
     mock_settings.WIKIDATA_ACTION_BATCH_SIZE = 10
     mock_settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT = 10
     mock_settings.LASTFM_CONCURRENT_REQUESTS = 2
     mock_settings.LASTFM_API_URL = "http://mock.last.fm"
 
-    # Mock Artist Index Data
-    mock_df = pl.DataFrame({
+    # Mock Input DataFrame (build_artist_index)
+    mock_index_df = pl.DataFrame({
         "artist_uri": [
             "http://www.wikidata.org/entity/Q1",
             "http://www.wikidata.org/entity/Q2",
-            "http://www.wikidata.org/entity/Q3", # Artist 3: No Wikipedia URL
-            "http://www.wikidata.org/entity/Q4"  # Artist 4: No Country
+            "http://www.wikidata.org/entity/Q3",
+            "http://www.wikidata.org/entity/Q4"
         ],
-        "name": ["Artist 1", "Artist 2", "Artist 3", "Artist 4"],
-        "wikipedia_url": [None, None, None, None]
+        "name": ["Artist 1", "Artist 2", "Artist 3", "Artist 4"]
     })
-    mock_read_ndjson.return_value = mock_df
 
     # Mock Wikidata Entity Data
     mock_fetch_entities.return_value = {
@@ -77,13 +67,13 @@ async def test_extract_artist(
             "aliases": {}
         },
         "Q3": {
-            "sitelinks": {}, # NO WIKIPEDIA URL
+            "sitelinks": {}, 
             "claims": {},
             "aliases": {}
         },
         "Q4": {
             "sitelinks": {"enwiki": {"title": "Artist 4"}},
-            "claims": {}, # NO COUNTRY
+            "claims": {},
             "aliases": {}
         }
     }
@@ -108,41 +98,19 @@ async def test_extract_artist(
         None
     ]
 
-    # Mock Context
+    # Mock Context and Resource
     api_config = ApiConfiguration(lastfm_api_key="dummy_key", nomic_api_key="dummy")
-    context = build_asset_context(resources={"api_config": api_config})
+    context = build_asset_context()
+    mock_client = MagicMock(spec=httpx.AsyncClient)
 
     # Execution
-    result = await extract_artist(context)
+    result_df = await extract_artist(context, mock_client, api_config, mock_index_df)
 
     # Assertions
-    assert result == Path("/tmp/datasets/artists.jsonl")
+    assert isinstance(result_df, pl.DataFrame)
+    assert len(result_df) == 4
     
-    # Verify stream_to_jsonl was called once
-    mock_stream.assert_called_once()
-    
-    # Consume the generator to trigger the logic and verify items
-    generator = mock_stream.call_args[0][0] # First arg is items
-    written_items = [i async for i in generator]
-    
-    assert len(written_items) == 4
-    
-    # Verify Last.fm calls (All 4 calls expected now)
-    assert mock_lastfm.call_count == 4
-    
-    artist1: Artist = written_items[0]
-    assert artist1.id == "Q1"
-    assert artist1.name == "Artist 1"
-    assert artist1.country == "Country A"
-    assert "Q200" in artist1.genres
-    
-    artist2: Artist = written_items[1]
-    assert artist2.id == "Q2"
-    assert artist2.country == "Country B"
-    
-    artist3: Artist = written_items[2]
-    assert artist3.id == "Q3"
-    
-    artist4: Artist = written_items[3]
-    assert artist4.id == "Q4"
-    assert artist4.country is None
+    artist1 = result_df.filter(pl.col("id") == "Q1").to_dicts()[0]
+    assert artist1["name"] == "Artist 1"
+    assert artist1["country"] == "Country A"
+    assert "Q200" in artist1["genres"]

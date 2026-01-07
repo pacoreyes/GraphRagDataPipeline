@@ -1,6 +1,6 @@
 # -----------------------------------------------------------
 # Query Embeddings Script
-# Dagster Data pipeline for Structured and Unstructured Data
+# Standalone Script for Querying ChromaDB
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License
