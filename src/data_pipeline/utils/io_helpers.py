@@ -7,12 +7,9 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-"""
-IO helpers
-"""
 import shutil
 from pathlib import Path
-from typing import Any, IO, Iterable, AsyncIterable, TypeVar, Union, Set
+from typing import Any, IO, Iterable, AsyncIterable, TypeVar, Union, Set, cast
 
 import msgspec
 
@@ -61,7 +58,7 @@ def merge_jsonl_files(input_paths: list[Path], output_path: Path) -> None:
         for input_path in input_paths:
             if input_path.exists():
                 with open(input_path, "rb") as infile:
-                    shutil.copyfileobj(infile, outfile)
+                    shutil.copyfileobj(cast(Any, infile), cast(Any, outfile))
 
 
 async def stream_to_jsonl(

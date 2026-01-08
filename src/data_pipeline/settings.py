@@ -107,14 +107,14 @@ class Settings(BaseSettings):
     # Wikidata API URLs
     WIKIDATA_ACTION_API_URL: str = "https://www.wikidata.org/w/api.php"
     WIKIDATA_SPARQL_ENDPOINT: str = "https://query.wikidata.org/sparql"
-    WIKIDATA_CONCEPT_BASE_URI_PREFIX: str = "http://www.wikidata.org/entity/"
-    WIKIDATA_SITE_BASE_URL: str = "http://www.wikidata.org/wiki/"
+    WIKIDATA_CONCEPT_BASE_URI_PREFIX: str = "https://www.wikidata.org/entity/"
+    WIKIDATA_SITE_BASE_URL: str = "https://www.wikidata.org/wiki/"
 
     # Wikipedia API URL
     WIKIPEDIA_API_URL: str = "https://en.wikipedia.org/w/api.php"
 
     # LastFM API URL
-    LASTFM_API_URL: str = "http://ws.audioscrobbler.com/2.0/"
+    LASTFM_API_URL: str = "https://ws.audioscrobbler.com/2.0/"
 
     # Bot's public identity (Polite for APIs)
     USER_AGENT: str = "Nodes AI (info@nodesAI.de)"
@@ -151,9 +151,9 @@ class Settings(BaseSettings):
     # ==============================================================================
     # NEO4J CONFIGURATION
     # ==============================================================================
-    NEO4J_URI: str
-    NEO4J_USERNAME: str
-    NEO4J_PASSWORD: str
+    NEO4J_URI: str = ""
+    NEO4J_USERNAME: str = ""
+    NEO4J_PASSWORD: str = ""
     GRAPH_DB_INGESTION_BATCH_SIZE: int = 1000
 
     # ==============================================================================

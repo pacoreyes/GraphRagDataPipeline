@@ -1,5 +1,5 @@
 # -----------------------------------------------------------
-# Dagster Partitions
+# Dagster Decade Partitions for Querying Wikidata in Parts
 # Dagster Data pipeline for Structured and Unstructured Data
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany

@@ -29,7 +29,7 @@ from nomic import atlas
 from nomic.data_inference import NomicTopicOptions
 from tqdm import tqdm
 
-from src.data_pipeline.settings import settings
+from data_pipeline.settings import settings
 
 
 VECTOR_DB_DIRPATH = settings.vector_db_dirpath
@@ -89,10 +89,13 @@ def main() -> None:
                 offset=offset,
                 include=["embeddings", "metadatas"],
             )
-            all_results["ids"].extend(batch["ids"])
-            all_results["embeddings"].extend(batch["embeddings"])
-            all_results["metadatas"].extend(batch["metadatas"])
-            pbar.update(len(batch["ids"]))
+            if batch["ids"]:
+                all_results["ids"].extend(batch["ids"])
+            if batch["embeddings"]:
+                all_results["embeddings"].extend(batch["embeddings"])
+            if batch["metadatas"]:
+                all_results["metadatas"].extend(batch["metadatas"])
+            pbar.update(len(batch["ids"]) if batch["ids"] else 0)
 
     if not all_results["embeddings"]:
         print("Error: No documents with embeddings found to visualize.")

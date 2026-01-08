@@ -65,7 +65,7 @@ async def async_fetch_wikipedia_article(
             content = await asyncio.to_thread(read_file)
             if content:
                 return content
-        except Exception:
+        except OSError:
             pass
 
     params = {
@@ -88,7 +88,7 @@ async def async_fetch_wikipedia_article(
         )
         
         data = response.json()
-        pages = data.get("query", {}).get("pages", {})
+        pages = (data.get("query") or {}).get("pages") or {}
         
         for page_id, page_data in pages.items():
             if page_id == "-1":
@@ -99,7 +99,7 @@ async def async_fetch_wikipedia_article(
                 await _async_save_text_cache(WIKIPEDIA_CACHE_DIR, cache_key, extract)
                 return extract
             
-    except Exception:
+    except (httpx.HTTPError, ValueError):
         return None
 
     return None

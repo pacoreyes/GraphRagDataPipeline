@@ -49,12 +49,12 @@ async def async_fetch_lastfm_data_with_cache(
     context: AssetExecutionContext,
     params: Dict[str, Any],
     cache_key_source: str,
+    api_key: str,
     client: Optional[httpx.AsyncClient] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Generic Last.fm API fetcher with local file caching.
     """
-    api_key = settings.LASTFM_API_KEY # Default from settings
     api_url = settings.LASTFM_API_URL
 
     if not all([api_key, api_url]):
@@ -72,7 +72,7 @@ async def async_fetch_lastfm_data_with_cache(
             data = await asyncio.to_thread(read_json)
             if "error" not in data:
                 return data
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             pass
 
     # Fetch from API

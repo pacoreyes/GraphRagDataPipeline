@@ -18,7 +18,6 @@ from data_pipeline.models import Genre
 from data_pipeline.settings import settings
 from data_pipeline.utils.network_helpers import yield_batches_concurrently
 from data_pipeline.utils.transformation_helpers import extract_unique_ids_from_column, normalize_and_clean_text
-from data_pipeline.utils.sparql_queries import get_genre_parents_batch_query
 from data_pipeline.utils.wikidata_helpers import (
     async_fetch_wikidata_entities_batch,
     extract_wikidata_aliases,
@@ -27,6 +26,26 @@ from data_pipeline.utils.wikidata_helpers import (
     get_sparql_binding_value,
 )
 from data_pipeline.defs.resources import WikidataResource
+
+
+def get_genre_parents_batch_query(genre_qids: list[str]) -> str:
+    """
+    Builds a SPARQL query to fetch the parent genres (subclass of P279) 
+    for a list of genre QIDs.
+
+    Args:
+        genre_qids: List of Genre Wikidata QIDs.
+
+    Returns:
+        A SPARQL query string.
+    """
+    values = " ".join([f"wd:{qid}" for qid in genre_qids])
+    return f"""
+    SELECT DISTINCT ?genre ?parent WHERE {{
+      VALUES ?genre {{ {values} }}
+      ?genre wdt:P279 ?parent.
+    }}
+    """
 
 
 @asset(
@@ -106,18 +125,19 @@ async def extract_genres(
         return batch_results
 
     # 3. Stream processing
-    genre_stream = yield_batches_concurrently(
-        items=unique_genre_ids,
-        batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
-        processor_fn=process_batch_combined,
-        concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
-        description="Fetching genre metadata and parents",
-        client=wikidata,
-    )
-    
-    # 4. Collect results
-    context.log.info("Collecting genres.")
-    genres_list = [msgspec.to_builtins(g) async for g in genre_stream]
+    async with wikidata.yield_for_execution(context) as client:
+        genre_stream = yield_batches_concurrently(
+            items=unique_genre_ids,
+            batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
+            processor_fn=process_batch_combined,
+            concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
+            description="Fetching genre metadata and parents",
+            client=client,
+        )
+        
+        # 4. Collect results
+        context.log.info("Collecting genres.")
+        genres_list = [msgspec.to_builtins(g) async for g in genre_stream]
 
     context.log.info(f"Successfully fetched {len(genres_list)} genres.")
     return pl.DataFrame(genres_list)

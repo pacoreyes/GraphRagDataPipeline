@@ -7,7 +7,7 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from typing import Any, Optional
+from typing import Any, Optional, LiteralString, cast
 
 from dagster import Config, AssetExecutionContext, EnvVar
 from neo4j import GraphDatabase, Driver
@@ -55,7 +55,9 @@ def execute_cypher(driver: Driver, query: str, params: dict[str, Any] | None = N
     """
     try:
         with driver.session(database=database) as session:
-            session.run(query, params or {}).consume()
+            # We cast to LiteralString because schema-altering queries cannot be parameterized,
+            # and the driver uses LiteralString as a safety hint.
+            session.run(cast(LiteralString, query), params or {}).consume()
     except Exception as e:
         raise e
 
@@ -70,11 +72,13 @@ def clear_database(driver: Driver, context: AssetExecutionContext) -> None:
         # 1. Delete all nodes and relationships
         # Using simple DETACH DELETE for smaller datasets. 
         # For huge datasets, batched deletion (CALL { ... } IN TRANSACTIONS) is preferred.
+        # noinspection SqlNoDataSourceInspection
         execute_cypher(driver, "MATCH (n) DETACH DELETE n;")
         context.log.info("Deleted all nodes and relationships.")
 
         # 2. Drop all indexes
         with driver.session() as session:
+            # noinspection SqlNoDataSourceInspection
             indexes = session.run("SHOW INDEXES").data()
             for idx in indexes:
                 # Filter system indexes or those we shouldn't touch if necessary
@@ -84,18 +88,21 @@ def clear_database(driver: Driver, context: AssetExecutionContext) -> None:
                 # We only drop explicitly created indexes (RANGE, POINT, TEXT)
                 if name and type_ in ["range", "point", "text", "btree"]: 
                     try:
-                        session.run(f"DROP INDEX {name}")
+                        # noinspection SqlNoDataSourceInspection
+                        session.run(cast(LiteralString, f"DROP INDEX {name}"))
                         context.log.info(f"Dropped index: {name}")
                     except Exception as e:
                         context.log.warning(f"Failed to drop index {name}: {e}")
 
             # Drop constraints as well if they exist
+            # noinspection SqlNoDataSourceInspection
             constraints = session.run("SHOW CONSTRAINTS").data()
             for const in constraints:
                 name = const.get("name")
                 if name:
                     try:
-                        session.run(f"DROP CONSTRAINT {name}")
+                        # noinspection SqlNoDataSourceInspection
+                        session.run(cast(LiteralString, f"DROP CONSTRAINT {name}"))
                         context.log.info(f"Dropped constraint: {name}")
                     except Exception as e:
                         context.log.warning(f"Failed to drop constraint {name}: {e}")
@@ -111,7 +118,7 @@ def create_indexes(driver: Driver, context: AssetExecutionContext) -> None:
     """
     context.log.info("Creating indexes...")
     
-    # Modern Neo4j syntax: CREATE INDEX [name] FOR (n:Label) ON (n.prop)
+    # noinspection SqlNoDataSourceInspection
     index_commands = [
         "CREATE INDEX artist_id_idx IF NOT EXISTS FOR (n:Artist) ON (n.id)",
         "CREATE INDEX artist_name_idx IF NOT EXISTS FOR (n:Artist) ON (n.name)",

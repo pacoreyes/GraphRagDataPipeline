@@ -23,8 +23,8 @@ from typing import Dict, Any
 
 import chromadb
 
-from music_rag_etl.settings import DEFAULT_MODEL_NAME, DEFAULT_COLLECTION_NAME
-from music_rag_etl.utils.chroma_helpers import (
+from data_pipeline.settings import settings
+from data_pipeline.utils.chroma_helpers import (
     NomicEmbeddingFunction,
     get_device,
 )
@@ -138,8 +138,8 @@ def _setup_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--collection",
         type=str,
-        default=DEFAULT_COLLECTION_NAME,
-        help=f"Collection name to query (default: {DEFAULT_COLLECTION_NAME}).",
+        default=settings.DEFAULT_COLLECTION_NAME,
+        help=f"Collection name to query (default: {settings.DEFAULT_COLLECTION_NAME}).",
     )
     parser.add_argument(
         "--view-embeddings",
@@ -178,7 +178,7 @@ def main() -> None:
     device = get_device()
     print(f"Using device: {device}")
 
-    emb_fn = NomicEmbeddingFunction(model_name=DEFAULT_MODEL_NAME, device=device)
+    emb_fn = NomicEmbeddingFunction(model_name=settings.DEFAULT_EMBEDDINGS_MODEL_NAME, device=device)
     client = chromadb.PersistentClient(path=str(args.db_path))
 
     try:

@@ -36,9 +36,9 @@ WIKIPEDIA_EXCLUSION_HEADERS = [
     "References",
     "External links",
     "See also",
-    "Further reading",
-    "Notes",
-    "Discography"
+    # "Further reading",
+    # "Notes",
+    # "Discography"
 ]
 
 
@@ -152,29 +152,32 @@ async def extract_wikipedia_articles(
         for row in batch:
             qid = row.get("id")
             entity_data = entities.get(qid)
-            if not entity_data: continue
+            if not entity_data:
+                continue
             wiki_url = extract_wikidata_wikipedia_url(entity_data)
             if wiki_url:
                 tasks.append(async_process_artist(row, wiki_url, client))
         
-        if not tasks: return []
+        if not tasks:
+            return []
         results_nested = await asyncio.gather(*tasks)
         return [item for sublist in results_nested for item in sublist]
 
     # 4. Execution Loop
-    article_stream = yield_batches_concurrently(
-        items=rows_to_process,
-        batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
-        processor_fn=process_batch_wrapper,
-        concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
-        description="Processing Articles",
-        timeout=settings.WIKIDATA_ACTION_REQUEST_TIMEOUT,
-        client=wikidata,
-    )
+    async with wikidata.yield_for_execution(context) as client:
+        article_stream = yield_batches_concurrently(
+            items=rows_to_process,
+            batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
+            processor_fn=process_batch_wrapper,
+            concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
+            description="Processing Articles",
+            timeout=settings.WIKIDATA_ACTION_REQUEST_TIMEOUT,
+            client=client,
+        )
 
-    # 5. Collect results
-    context.log.info("Collecting Wikipedia articles.")
-    articles_list = [msgspec.to_builtins(article) async for article in article_stream]
+        # 5. Collect results
+        context.log.info("Collecting Wikipedia articles.")
+        articles_list = [msgspec.to_builtins(article) async for article in article_stream]
 
     context.log.info(f"Wikipedia extraction complete. Fetched {len(articles_list)} chunks.")
     

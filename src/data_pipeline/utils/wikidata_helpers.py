@@ -126,7 +126,7 @@ async def fetch_sparql_query_async(
             client=client,
         )
         data = msgspec.json.decode(response.content)
-        return data.get("results", {}).get("bindings", [])
+        return (data.get("results") or {}).get("bindings") or []
     except httpx.HTTPError as e:
         context.log.error(f"An unrecoverable error occurred during SPARQL query: {e}")
         raise
@@ -137,7 +137,7 @@ async def fetch_sparql_query_async(
 
 def get_sparql_binding_value(data: dict[str, Any], key: str) -> Any:
     """Extracts a simple value from a SPARQL result binding."""
-    return data.get(key, {}).get("value")
+    return (data.get(key) or {}).get("value")
 
 
 # --- Entity Fetching Helpers ---
@@ -264,12 +264,12 @@ async def async_resolve_qids_to_labels(
 
 def extract_wikidata_label(entity_data: Dict[str, Any], lang: str = "en") -> Optional[str]:
     """Extracts the label for a given language."""
-    return entity_data.get("labels", {}).get(lang, {}).get("value")
+    return ((entity_data.get("labels") or {}).get(lang) or {}).get("value")
 
 
 def extract_wikidata_aliases(entity_data: Dict[str, Any], lang: str = "en") -> List[str]:
     """Extracts aliases for a given language."""
-    aliases = entity_data.get("aliases", {}).get(lang, [])
+    aliases = (entity_data.get("aliases") or {}).get(lang) or []
     return [a["value"] for a in aliases]
 
 
@@ -326,5 +326,5 @@ def extract_wikidata_claim_ids(
         if mainsnak.get("snaktype") == "value":
             datavalue = mainsnak.get("datavalue", {})
             if datavalue.get("type") == "wikibase-entityid":
-                ids.append(datavalue.get("value", {}).get("id"))
+                ids.append((datavalue.get("value") or {}).get("id"))
     return [i for i in ids if i]

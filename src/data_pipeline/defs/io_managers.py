@@ -9,7 +9,7 @@
 
 import os
 from pathlib import Path
-from typing import Union
+from typing import Union, Optional
 
 import msgspec
 import polars as pl
@@ -25,7 +25,7 @@ class PolarsJSONLIOManager(ConfigurableIOManager):
     """
     base_dir: str = str(settings.datasets_dirpath)
 
-    def _get_path(self, context: Union[InputContext, OutputContext], partition_key: str = None) -> Path:
+    def _get_path(self, context: Union[InputContext, OutputContext], partition_key: Optional[str] = None) -> Path:
         """Determines the file path based on the asset key and partition."""
         asset_name = context.asset_key.path[-1]
         
@@ -35,11 +35,8 @@ class PolarsJSONLIOManager(ConfigurableIOManager):
                 if context.has_partition_key:
                     pk = context.partition_key
             elif isinstance(context, InputContext):
-                if context.has_asset_partitions:
-                    try:
-                        pk = context.asset_partition_key
-                    except Exception:
-                        pass
+                if context.has_asset_partitions and context.has_partition_key:
+                    pk = context.asset_partition_key
         
         if pk:
             return Path(self.base_dir) / asset_name / f"{pk}.jsonl"

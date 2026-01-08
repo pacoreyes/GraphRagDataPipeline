@@ -18,13 +18,42 @@ from data_pipeline.models import Track
 from data_pipeline.settings import settings
 from data_pipeline.utils.io_helpers import deduplicate_stream
 from data_pipeline.utils.network_helpers import yield_batches_concurrently
-from data_pipeline.utils.sparql_queries import get_tracks_by_albums_batch_query
 from data_pipeline.utils.wikidata_helpers import (
     fetch_sparql_query_async,
     get_sparql_binding_value,
 )
 from data_pipeline.utils.transformation_helpers import normalize_and_clean_text
 from data_pipeline.defs.resources import WikidataResource
+
+
+def get_tracks_by_albums_batch_query(album_qids: list[str]) -> str:
+    """
+    Builds a SPARQL query to fetch tracks for multiple albums in one request.
+    Uses bidirectional logic: Album->Track (P658) OR Track->Album (P361).
+    Implements explicit label fallback (English -> Any).
+
+    Args:
+        album_qids: List of Album Wikidata QIDs.
+
+    Returns:
+        A SPARQL query string.
+    """
+    values = " ".join([f"wd:{qid}" for qid in album_qids])
+    return f"""
+    SELECT DISTINCT ?album ?track ?trackLabel ?genre WHERE {{
+      VALUES ?album {{ {values} }}
+      {{ ?album wdt:P658 ?track. }}  # Forward: Album has tracklist containing track
+      UNION
+      {{ ?track wdt:P361 ?album. }}  # Reverse: Track is part of album
+      
+      OPTIONAL {{ ?track wdt:P136 ?genre. }}
+
+      # Label Fallback: English -> Any
+      OPTIONAL {{ ?track rdfs:label ?enLabel . FILTER(LANG(?enLabel) = "en") }}
+      OPTIONAL {{ ?track rdfs:label ?anyLabel . }}
+      BIND(COALESCE(?enLabel, ?anyLabel) AS ?trackLabel)
+    }}
+    """
 
 
 @asset(
@@ -97,22 +126,23 @@ async def extract_tracks(
         ]
 
     # 3. Stream processing
-    track_stream = yield_batches_concurrently(
-        items=album_qids,
-        batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
-        processor_fn=process_batch,
-        concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
-        description="Fetching tracks",
-        timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
-        client=wikidata,
-    )
+    async with wikidata.yield_for_execution(context) as client:
+        track_stream = yield_batches_concurrently(
+            items=album_qids,
+            batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
+            processor_fn=process_batch,
+            concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
+            description="Fetching tracks",
+            timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
+            client=client,
+        )
 
-    # 4. Collect results (Deduplicate globally by ID + AlbumID)
-    context.log.info("Collecting and deduplicating tracks.")
-    tracks_list = [
-        msgspec.to_builtins(track) 
-        async for track in deduplicate_stream(track_stream, key_attr=["id", "album_id"])
-    ]
+        # 4. Collect results (Deduplicate globally by ID + AlbumID)
+        context.log.info("Collecting and deduplicating tracks.")
+        tracks_list = [
+            msgspec.to_builtins(track) 
+            async for track in deduplicate_stream(track_stream, key_attr=["id", "album_id"])
+        ]
 
     context.log.info(f"Successfully fetched {len(tracks_list)} tracks.")
     

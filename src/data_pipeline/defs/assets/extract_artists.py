@@ -7,7 +7,7 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from typing import Any, Optional, List
+from typing import Any, Optional
 
 import httpx
 import msgspec
@@ -129,20 +129,41 @@ async def _enrich_artist_batch(
         # Priority 1: MBID
         if mbid:
             lastfm_data = await async_fetch_lastfm_data_with_cache(
-                context, {"method": "artist.getInfo", "mbid": mbid, "autocorrect": 1}, mbid, client=client
+                context, {
+                    "method": "artist.getInfo",
+                    "mbid": mbid,
+                    "autocorrect": 1
+                },
+                mbid,
+                api_key=api_config.lastfm_api_key,
+                client=client
             )
         
         # Priority 2: Name
         if not lastfm_data or "error" in lastfm_data:
             lastfm_data = await async_fetch_lastfm_data_with_cache(
-                context, {"method": "artist.getInfo", "artist": name, "autocorrect": 1}, name, client=client
+                context, {
+                    "method": "artist.getInfo",
+                    "artist": name,
+                    "autocorrect": 1
+                },
+                name,
+                api_key=api_config.lastfm_api_key,
+                client=client
             )
             
         # Priority 3: Aliases
         if (not lastfm_data or "error" in lastfm_data) and aliases:
             for alias in aliases:
                 lastfm_data = await async_fetch_lastfm_data_with_cache(
-                    context, {"method": "artist.getInfo", "artist": alias, "autocorrect": 1}, alias, client=client
+                    context, {
+                        "method": "artist.getInfo",
+                        "artist": alias,
+                        "autocorrect": 1
+                    },
+                    alias,
+                    api_key=api_config.lastfm_api_key,
+                    client=client
                 )
                 if lastfm_data and "error" not in lastfm_data:
                     break
@@ -151,16 +172,18 @@ async def _enrich_artist_batch(
         similar_artists = []
         if lastfm_data and "artist" in lastfm_data:
             # Domain-specific parsing of Last.fm response
-            artist_data = lastfm_data["artist"]
+            artist_data = lastfm_data.get("artist") or {}
             
             # Tags
-            raw_tags = artist_data.get("tags", {}).get("tag", [])
-            if isinstance(raw_tags, dict): raw_tags = [raw_tags]
+            raw_tags = (artist_data.get("tags") or {}).get("tag") or []
+            if isinstance(raw_tags, dict):
+                raw_tags = [raw_tags]
             tags = [t["name"] for t in raw_tags if isinstance(t, dict) and "name" in t]
             
             # Similar
-            raw_sim = artist_data.get("similar", {}).get("artist", [])
-            if isinstance(raw_sim, dict): raw_sim = [raw_sim]
+            raw_sim = (artist_data.get("similar") or {}).get("artist") or []
+            if isinstance(raw_sim, dict):
+                raw_sim = [raw_sim]
             similar_artists = [s["name"] for s in raw_sim if isinstance(s, dict) and "name" in s]
 
         return Artist(
@@ -212,22 +235,23 @@ async def extract_artists(
         return await _enrich_artist_batch(batch, context, api_config, client)
 
     # Process batches concurrently
-    artist_stream = yield_batches_concurrently(
-        items=artists_list,
-        batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
-        processor_fn=process_batch_wrapper,
-        concurrency_limit=1,
-        description="Processing Artist Batches",
-        timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
-        client=wikidata,
-    )
+    async with wikidata.yield_for_execution(context) as client:
+        artist_stream = yield_batches_concurrently(
+            items=artists_list,
+            batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
+            processor_fn=process_batch_wrapper,
+            concurrency_limit=1,
+            description="Processing Artist Batches",
+            timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
+            client=client,
+        )
 
-    # Collect results
-    context.log.info("Collecting enriched artists.")
-    enriched_artists_dicts = [
-        msgspec.to_builtins(a) 
-        async for a in deduplicate_stream(artist_stream, key_attr="id")
-    ]
+        # Collect results
+        context.log.info("Collecting enriched artists.")
+        enriched_artists_dicts = [
+            msgspec.to_builtins(a) 
+            async for a in deduplicate_stream(artist_stream, key_attr="id")
+        ]
 
     context.log.info(f"Enriched {len(enriched_artists_dicts)} artists.")
     

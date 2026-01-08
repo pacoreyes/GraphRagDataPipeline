@@ -9,11 +9,17 @@
 
 import re
 import unicodedata
-from typing import Union
+from typing import Union, Optional, overload
 
 import ftfy
 import polars as pl
 
+
+@overload
+def normalize_and_clean_text(text_or_expr: str) -> str: ...
+
+@overload
+def normalize_and_clean_text(text_or_expr: pl.Expr) -> pl.Expr: ...
 
 def normalize_and_clean_text(text_or_expr: Union[str, pl.Expr]) -> Union[str, pl.Expr]:
     """
@@ -45,7 +51,7 @@ def normalize_and_clean_text(text_or_expr: Union[str, pl.Expr]) -> Union[str, pl
         # 1 & 2. Repair & Normalize
         # We must use a Python UDF here as Polars lacks native ftfy/NFKC support.
         # return_dtype=pl.String is important for schema inference.
-        def _repair_and_normalize(val: str) -> str:
+        def _repair_and_normalize(val: Optional[str]) -> Optional[str]:
             if val is None:
                 return None
             val = ftfy.fix_text(val)

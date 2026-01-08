@@ -18,13 +18,45 @@ from data_pipeline.models import Album
 from data_pipeline.settings import settings
 from data_pipeline.utils.io_helpers import deduplicate_stream
 from data_pipeline.utils.network_helpers import yield_batches_concurrently
-from data_pipeline.utils.sparql_queries import get_albums_by_artists_batch_query
 from data_pipeline.utils.wikidata_helpers import (
     fetch_sparql_query_async,
     get_sparql_binding_value,
 )
 from data_pipeline.utils.transformation_helpers import normalize_and_clean_text
 from data_pipeline.defs.resources import WikidataResource
+
+
+def get_albums_by_artists_batch_query(artist_qids: list[str]) -> str:
+    """
+    Builds a SPARQL query to fetch albums for multiple artists in one request.
+
+    Args:
+        artist_qids: List of Wikidata QIDs.
+
+    Returns:
+        A SPARQL query string.
+    """
+    values = " ".join([f"wd:{qid}" for qid in artist_qids])
+    return f"""
+    SELECT ?album ?albumLabel ?releaseDate ?artist ?genre WHERE {{
+      VALUES ?artist {{ {values} }}
+      ?album wdt:P175 ?artist.
+      
+      # Exclude non-standard releases
+      FILTER NOT EXISTS {{ ?album wdt:P31 wd:Q134556. }}   # exclude singles
+      FILTER NOT EXISTS {{ ?album wdt:P7937 wd:Q222910. }}  # exclude compilations
+      FILTER NOT EXISTS {{ ?album wdt:P7937 wd:Q209939. }}  # exclude live albums
+      FILTER NOT EXISTS {{ ?album wdt:P31 wd:Q10590726. }}  # exclude video albums
+      
+      OPTIONAL {{ ?album wdt:P577 ?releaseDate. }}
+      OPTIONAL {{ ?album wdt:P136 ?genre. }}
+      
+      # Label Fallback: English -> Any
+      OPTIONAL {{ ?album rdfs:label ?enLabel . FILTER(LANG(?enLabel) = "en") }}
+      OPTIONAL {{ ?album rdfs:label ?anyLabel . }}
+      BIND(COALESCE(?enLabel, ?anyLabel) AS ?albumLabel)
+    }}
+    """
 
 
 @asset(
@@ -126,22 +158,23 @@ async def extract_albums(
         return list(final_map.values())
 
     # 3. Stream processing
-    album_stream = yield_batches_concurrently(
-        items=artist_qids,
-        batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
-        processor_fn=process_batch,
-        concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
-        description="Fetching albums",
-        timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
-        client=wikidata,
-    )
+    async with wikidata.yield_for_execution(context) as client:
+        album_stream = yield_batches_concurrently(
+            items=artist_qids,
+            batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
+            processor_fn=process_batch,
+            concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
+            description="Fetching albums",
+            timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
+            client=client,
+        )
 
-    # 4. Collect results (Deduplicate globally by Title + Artist)
-    context.log.info("Collecting and deduplicating albums.")
-    albums_list = [
-        msgspec.to_builtins(album) 
-        async for album in deduplicate_stream(album_stream, key_attr=["title", "artist_id"])
-    ]
+        # 4. Collect results (Deduplicate globally by Title + Artist)
+        context.log.info("Collecting and deduplicating albums.")
+        albums_list = [
+            msgspec.to_builtins(album) 
+            async for album in deduplicate_stream(album_stream, key_attr=["title", "artist_id"])
+        ]
 
     context.log.info(f"Successfully fetched {len(albums_list)} albums.")
     
