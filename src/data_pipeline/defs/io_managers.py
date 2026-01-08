@@ -82,11 +82,11 @@ class PolarsJSONLIOManager(ConfigurableIOManager):
                 results = {}
                 for pk in partition_keys:
                     path = self._get_path(context, partition_key=pk)
-                    results[pk] = pl.read_ndjson(path) if path.exists() else pl.DataFrame()
+                    results[pk] = pl.read_ndjson(str(path)) if path.exists() else pl.DataFrame()
                 return results
             
         path = self._get_path(context)
         if not path.exists():
             return pl.DataFrame()
 
-        return pl.read_ndjson(path)
+        return pl.read_ndjson(str(path))
