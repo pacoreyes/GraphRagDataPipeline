@@ -31,7 +31,7 @@ from data_pipeline.utils.wikidata_helpers import (
 )
 from data_pipeline.utils.lastfm_helpers import async_fetch_lastfm_data_with_cache
 from data_pipeline.utils.transformation_helpers import normalize_and_clean_text
-from data_pipeline.defs.resources import WikidataResource, ApiConfiguration
+from data_pipeline.defs.resources import WikidataResource, LastFmResource
 
 # --- Music Domain Constants ---
 WIKIDATA_PROP_COUNTRY = ["P495", "P27"]
@@ -42,7 +42,7 @@ WIKIDATA_PROP_MBID = "P434"
 async def _enrich_artist_batch(
     artist_batch: list[dict[str, Any]],
     context: AssetExecutionContext,
-    api_config: ApiConfiguration,
+    lastfm: LastFmResource,
     client: httpx.AsyncClient,
 ) -> list[Artist]:
     """
@@ -135,7 +135,7 @@ async def _enrich_artist_batch(
                     "autocorrect": 1
                 },
                 mbid,
-                api_key=api_config.lastfm_api_key,
+                api_key=lastfm.api_key,
                 client=client
             )
         
@@ -148,7 +148,7 @@ async def _enrich_artist_batch(
                     "autocorrect": 1
                 },
                 name,
-                api_key=api_config.lastfm_api_key,
+                api_key=lastfm.api_key,
                 client=client
             )
             
@@ -162,7 +162,7 @@ async def _enrich_artist_batch(
                         "autocorrect": 1
                     },
                     alias,
-                    api_key=api_config.lastfm_api_key,
+                    api_key=lastfm.api_key,
                     client=client
                 )
                 if lastfm_data and "error" not in lastfm_data:
@@ -217,7 +217,7 @@ async def _enrich_artist_batch(
 async def extract_artists(
     context: AssetExecutionContext, 
     wikidata: WikidataResource, 
-    api_config: ApiConfiguration,
+    lastfm: LastFmResource,
     artist_index: pl.DataFrame
 ) -> pl.DataFrame:
     """
@@ -232,7 +232,7 @@ async def extract_artists(
     async def process_batch_wrapper(
         batch: list[dict[str, Any]], client: httpx.AsyncClient
     ) -> list[Artist]:
-        return await _enrich_artist_batch(batch, context, api_config, client)
+        return await _enrich_artist_batch(batch, context, lastfm, client)
 
     # Process batches concurrently
     async with wikidata.yield_for_execution(context) as client:

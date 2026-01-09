@@ -23,12 +23,18 @@ from data_pipeline.settings import settings
 from .io_managers import PolarsJSONLIOManager
 
 
-class ApiConfiguration(ConfigurableResource):
+class LastFmResource(ConfigurableResource):
     """
-    Configuration for external API keys.
+    Configuration for Last.fm API.
     """
-    lastfm_api_key: str
-    nomic_api_key: str
+    api_key: str
+
+
+class NomicResource(ConfigurableResource):
+    """
+    Configuration for Nomic API.
+    """
+    api_key: str
 
 
 class Neo4jResource(ConfigurableResource):
@@ -69,10 +75,8 @@ is_prod = os.getenv("DAGSTER_ENV") == "PROD"
 
 # Base resources
 resource_defs: dict[str, Any] = {
-    "api_config": ApiConfiguration(
-        lastfm_api_key=EnvVar("LASTFM_API_KEY"),
-        nomic_api_key=EnvVar("NOMIC_API_KEY"),
-    ),
+    "lastfm": LastFmResource(api_key=EnvVar("LASTFM_API_KEY")),
+    "nomic": NomicResource(api_key=EnvVar("NOMIC_API_KEY")),
     "neo4j": Neo4jResource(),
     "wikidata": WikidataResource(
         user_agent=settings.USER_AGENT,

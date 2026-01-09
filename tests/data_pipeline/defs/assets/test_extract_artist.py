@@ -14,7 +14,7 @@ import polars as pl
 from dagster import build_asset_context
 
 from data_pipeline.defs.assets.extract_artists import extract_artists
-from data_pipeline.defs.resources import ApiConfiguration
+from data_pipeline.defs.resources import LastFmResource
 
 @pytest.mark.asyncio
 @patch("data_pipeline.defs.assets.extract_artists.async_fetch_lastfm_data_with_cache")
@@ -98,7 +98,7 @@ async def test_extract_artist(
     from contextlib import asynccontextmanager
 
     # Mock Context and Resource
-    api_config = ApiConfiguration(lastfm_api_key="dummy_key", nomic_api_key="dummy")
+    lastfm = LastFmResource(api_key="dummy_key")
     context = build_asset_context()
     mock_client = MagicMock(spec=httpx.AsyncClient)
 
@@ -109,7 +109,7 @@ async def test_extract_artist(
     mock_wikidata.yield_for_execution = mock_yield
 
     # Execution
-    result_df = await extract_artists(context, mock_wikidata, api_config, mock_index_df)
+    result_df = await extract_artists(context, mock_wikidata, lastfm, mock_index_df)
 
     # Assertions
     assert isinstance(result_df, pl.DataFrame)
