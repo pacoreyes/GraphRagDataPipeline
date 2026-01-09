@@ -1,3 +1,3 @@
-from . import definitions as definitions
-from . import settings as settings
-from . import models as models
+from . import definitions
+from . import settings
+from . import models
