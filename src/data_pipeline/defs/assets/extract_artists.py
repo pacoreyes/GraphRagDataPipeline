@@ -16,10 +16,10 @@ from dagster import asset, AssetExecutionContext
 
 from data_pipeline.models import Artist
 from data_pipeline.settings import settings
-from data_pipeline.utils.io_helpers import deduplicate_stream
 from data_pipeline.utils.network_helpers import (
     run_tasks_concurrently,
     yield_batches_concurrently,
+    deduplicate_stream,
 )
 from data_pipeline.utils.wikidata_helpers import (
     async_fetch_wikidata_entities_batch,

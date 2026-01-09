@@ -16,8 +16,10 @@ from dagster import asset, AssetExecutionContext
 
 from data_pipeline.models import Track
 from data_pipeline.settings import settings
-from data_pipeline.utils.io_helpers import deduplicate_stream
-from data_pipeline.utils.network_helpers import yield_batches_concurrently
+from data_pipeline.utils.network_helpers import (
+    yield_batches_concurrently,
+    deduplicate_stream,
+)
 from data_pipeline.utils.wikidata_helpers import (
     fetch_sparql_query_async,
     get_sparql_binding_value,

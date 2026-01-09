@@ -58,7 +58,12 @@ def get_neo4j_driver(config: Optional[Neo4jConfig] = None) -> Driver:
     return GraphDatabase.driver(uri, auth=(username, password))
 
 
-def execute_cypher(driver: Driver, query: str, params: dict[str, Any] | None = None, database: str = "neo4j") -> None:
+def execute_cypher(
+    driver: Driver,
+    query: str,
+    params: dict[str, Any] | None = None,
+    database: str = "neo4j"
+) -> None:
     """
     Executes a Cypher query with optional parameters using the Neo4j driver.
     """

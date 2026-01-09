@@ -26,7 +26,10 @@ from data_pipeline.defs.resources import WikidataResource
 
 
 def get_artists_by_year_range_query(
-    start_year: int, end_year: int, limit: int, offset: int
+    start_year: int,
+    end_year: int,
+    limit: int,
+    offset: int
 ) -> str:
     """
     Generate a SPARQL query to fetch artists active within a specific year range.
