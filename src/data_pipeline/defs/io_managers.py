@@ -15,15 +15,13 @@ import msgspec
 import polars as pl
 from dagster import ConfigurableIOManager, InputContext, OutputContext
 
-from data_pipeline.settings import settings
-
 
 class PolarsJSONLIOManager(ConfigurableIOManager):
     """
     I/O Manager that saves and loads Polars DataFrames as JSONL files.
     Supports sparse JSON output by omitting null properties.
     """
-    base_dir: str = str(settings.datasets_dirpath)
+    base_dir: str
 
     def _get_path(self, context: Union[InputContext, OutputContext], partition_key: Optional[str] = None) -> Path:
         """Determines the file path based on the asset key and partition."""
