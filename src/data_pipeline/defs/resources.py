@@ -41,9 +41,9 @@ class Neo4jResource(ConfigurableResource):
     """
     Resource for interacting with the Neo4j graph database.
     """
-    uri: str = EnvVar("NEO4J_URI")
-    username: str = EnvVar("NEO4J_USERNAME")
-    password: str = EnvVar("NEO4J_PASSWORD")
+    uri: str
+    username: str
+    password: str
 
     @contextmanager
     def yield_for_execution(self, context) -> Generator[Driver, None, None]:
@@ -77,7 +77,11 @@ is_prod = os.getenv("DAGSTER_ENV") == "PROD"
 resource_defs: dict[str, Any] = {
     "lastfm": LastFmResource(api_key=EnvVar("LASTFM_API_KEY")),
     "nomic": NomicResource(api_key=EnvVar("NOMIC_API_KEY")),
-    "neo4j": Neo4jResource(),
+    "neo4j": Neo4jResource(
+        uri=EnvVar("NEO4J_URI"),
+        username=EnvVar("NEO4J_USERNAME"),
+        password=EnvVar("NEO4J_PASSWORD"),
+    ),
     "wikidata": WikidataResource(
         user_agent=settings.USER_AGENT,
         timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT
