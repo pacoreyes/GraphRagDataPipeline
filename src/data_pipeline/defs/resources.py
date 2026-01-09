@@ -7,7 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-import os
 from contextlib import contextmanager, asynccontextmanager
 from typing import Any, AsyncGenerator, Generator
 
@@ -69,9 +68,6 @@ class WikidataResource(ConfigurableResource):
         ) as client:
             yield client
 
-
-# Environment Logic
-is_prod = os.getenv("DAGSTER_ENV") == "PROD"
 
 # Base resources
 resource_defs: dict[str, Any] = {
