@@ -27,7 +27,7 @@ We leverage **Polars** for high-performance data transformation, **Pydantic** fo
 
 ## Tech Stack
 
-- **Orchestration:** [Dagster](https://dagster.io/) (with GCP integration)
+- **Orchestration:** [Dagster](https://dagster.io/) (Assets, Resources, Partitions, Asset Checks)
 - **Databases:** [Neo4j](https://neo4j.com/) (Graph), [ChromaDB](https://www.trychroma.com/) (Vector)
 - **Data Engineering:** [Polars](https://pola.rs/) (manipulation), [Msgspec](https://github.com/jcrist/msgspec) (serialization), [Ftfy](https://github.com/rspeer/python-ftfy) (cleaning)
 - **Data Validation & Config:** [Pydantic](https://pydantic.dev/), [Pydantic Settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/)
@@ -37,12 +37,38 @@ We leverage **Polars** for high-performance data transformation, **Pydantic** fo
 
 ## Project Structure (Clean Architecture)
 
-The project follows a layered architecture to separate business logic from orchestration infrastructure:
+The project follows a layered architecture to separate business logic from orchestration infrastructure, ensuring maintainability and scalability.
 
-*   **`src/data_pipeline/defs/assets/`**: Contains the **Business Logic**. Each file defines a Data Asset (e.g., `artists`, `albums`) and the transformation logic to create it.
-*   **`src/data_pipeline/defs/resources.py`**: Contains **Infrastructure Definitions**. Defines connections to Neo4j and APIs, allowing assets to remain environment-agnostic.
-*   **`src/data_pipeline/defs/io_managers.py`**: Contains the **Storage Logic**. A custom `PolarsJSONLIOManager` handles reading/writing DataFrames to disk, enforcing sparse JSON standards automatically.
-*   **`src/data_pipeline/utils/`**: Contains **Generic Helpers**. Reusable, domain-agnostic utilities for Network I/O, Caching, and Text Processing.
+### Core Components
+
+*   **`src/data_pipeline/defs/assets/` (The "What")**:
+    *   Defines the **Business Logic**. Each file represents a Data Asset (e.g., `artists`, `albums`) and the high-level recipe to create it.
+    *   Assets focus on *orchestration*: they declare their dependencies, request resources, and call utility functions to process data.
+
+*   **`src/data_pipeline/defs/resources.py` (The Infrastructure)**:
+    *   Defines **Environment Connections**. Handles the lifecycle of connections to Neo4j, External APIs (Wikidata, Last.fm), and file storage.
+    *   Allows assets to remain environment-agnostic (swappable between Dev/Prod/Test).
+
+*   **`src/data_pipeline/utils/` (The "How-To")**:
+    *   Contains **Reusable, Low-Level Logic**. This is the toolbox used by assets.
+    *   **Role 1: Reusability (DRY):** Shared logic like `make_async_request_with_retries` or `normalize_and_clean_text`.
+    *   **Role 2: Complexity Hiding:** Encapsulates messy details (SPARQL query construction, JSON parsing, Unicode fixing) to keep Asset files clean and readable.
+    *   **Role 3: Testability:** Functions are designed to be "pure" or generic, making them easy to unit test in isolation.
+    *   *Key Modules:*
+        *   `network_helpers.py`: Transport layer (retries, batching, rate limiting).
+        *   `*_helpers.py`: Service wrappers for Wikidata, Last.fm, etc.
+        *   `text_transformation_helpers.py`: Domain-agnostic text cleaning (ftfy, regex).
+        *   `graph_db_helpers.py`: Cypher query wrappers and index management.
+
+*   **`src/data_pipeline/defs/checks.py` (The Quality Gate)**:
+    *   Defines **Automated Data Quality Checks**. Verifies the integrity of assets *after* they are materialized (e.g., "Are there >0 null IDs?", "Is the album count per artist reasonable?").
+
+### The "Use" Hierarchy
+
+1.  **Resources** (`defs/resources.py`): Provide the raw connection (e.g., `httpx.AsyncClient`, `Neo4j Driver`).
+2.  **Utils** (`utils/*.py`): Use the connection to perform specific actions (e.g., `fetch_sparql_query`, `clear_database`) or pure data transformations.
+3.  **Assets** (`defs/assets/*.py`): Orchestrate the Utils to achieve a business goal (e.g., "Extract Albums").
+4.  **Checks** (`defs/checks.py`): Verify the final output of the Assets ensuring data trust.
 
 ## Data Architecture
 
