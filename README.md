@@ -80,14 +80,15 @@ The pipeline transforms raw data from external APIs into two optimized formats: 
 graph TD
     A[Wikidata SPARQL] -->|Partitioned by Decade| B(Artist Index Partitions)
     B -->|Fan-In Merge| C[Artist Index Merged]
-    C -->|Fetch Details| D[Wikidata API]
-    C -->|Fetch Metadata| E[Last.fm API]
-    D --> F[Refined Entities]
-    E --> F
-    F -->|Nodes & Edges| G[(Neo4j Graph DB)]
-    F -->|Wikipedia URLs| H[Wikipedia API]
-    H -->|Text Content| I[Text Splitter]
-    I -->|Enrich w/ Metadata| J[RAG Documents JSONL]
+    C -->|Fetch Details| D[extract_artists]
+    D --> E[extract_albums]
+    E --> F[extract_tracks]
+    F --> G[extract_genres]
+    D & E & F & G --> H[ingest_graph_db]
+    H -->|Nodes & Edges| I[(Neo4j Graph DB)]
+    D -->|Wikipedia URLs| J[extract_wikipedia_articles]
+    J -->|Text Content| K[Text Splitter]
+    K -->|Enrich w/ Metadata| L[RAG Documents JSONL]
 ```
 
 ### 1. Unstructured Data (RAG Preparation)
@@ -108,8 +109,43 @@ We process Wikipedia articles to create a high-quality corpus for Retrieval-Augm
 
 We construct a deterministic Knowledge Graph to map the relationships between the musical entities. This allows for precise multi-hop queries (e.g., "Find all sub-genres of 'House' that originated in 'France'").
 
+#### Graph Schema
+
+```mermaid
+erDiagram
+    Artist ||--o{ Genre : HAS_GENRE
+    Artist ||--o{ Artist : SIMILAR_TO
+    Album ||--|| Artist : PERFORMED_BY
+    Album ||--o{ Track : CONTAINS_TRACK
+    Album ||--o{ Genre : HAS_GENRE
+    Track ||--o{ Genre : HAS_GENRE
+    Genre ||--o{ Genre : SUBGENRE_OF
+    
+    Artist {
+        string id
+        string name
+        string country
+        string_list aliases
+        string_list tags
+    }
+    Album {
+        string id
+        string title
+        int year
+    }
+    Track {
+        string id
+        string title
+    }
+    Genre {
+        string id
+        string name
+        string_list aliases
+    }
+```
+
 #### Nodes (Entities)
-- **Artist:** The core entity (e.g., "Daft Punk"). Properties include country, active years, and Last.fm tags.
+- **Artist:** The core entity (e.g., "Daft Punk").
 - **Album:** Major releases linked to artists.
 - **Track:** Individual songs linked to albums.
 - **Genre:** A hierarchical taxonomy of musical styles (e.g., "French House" -> "House" -> "Electronic").
@@ -118,6 +154,9 @@ We construct a deterministic Knowledge Graph to map the relationships between th
 - `(Artist)-[:HAS_GENRE]->(Genre)`
 - `(Artist)-[:SIMILAR_TO]->(Artist)`: Derived from Last.fm community data.
 - `(Album)-[:PERFORMED_BY]->(Artist)`
+- `(Album)-[:CONTAINS_TRACK]->(Track)`
+- `(Album)-[:HAS_GENRE]->(Genre)`
+- `(Track)-[:HAS_GENRE]->(Genre)`
 - `(Genre)-[:SUBGENRE_OF]->(Genre)`: Enables hierarchical graph traversal.
 
 **Dataset Statistics:**
