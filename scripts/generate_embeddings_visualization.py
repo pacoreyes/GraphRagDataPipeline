@@ -32,7 +32,7 @@ from tqdm import tqdm
 from data_pipeline.settings import settings
 
 
-VECTOR_DB_DIRPATH = settings.vector_db_dirpath
+VECTOR_DB_DIRPATH = settings.VECTOR_DB_DIRPATH
 COLLECTION_NAME = settings.DEFAULT_COLLECTION_NAME
 
 

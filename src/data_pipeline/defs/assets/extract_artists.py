@@ -39,6 +39,38 @@ WIKIDATA_PROP_GENRE = ["P136", "P101"]
 WIKIDATA_PROP_MBID = "P434"
 
 
+import uuid
+from typing import Any, Optional
+
+import httpx
+import msgspec
+import polars as pl
+from dagster import asset, AssetExecutionContext
+
+from data_pipeline.models import Artist
+from data_pipeline.settings import settings
+from data_pipeline.utils.network_helpers import (
+    run_tasks_concurrently,
+)
+from data_pipeline.utils.io_helpers import async_append_jsonl
+from data_pipeline.utils.wikidata_helpers import (
+    async_fetch_wikidata_entities_batch,
+    async_resolve_qids_to_labels,
+    extract_wikidata_aliases,
+    extract_wikidata_claim_value,
+    extract_wikidata_claim_ids,
+    extract_wikidata_wikipedia_url,
+)
+from data_pipeline.utils.lastfm_helpers import async_fetch_lastfm_data_with_cache
+from data_pipeline.utils.text_transformation_helpers import normalize_and_clean_text
+from data_pipeline.defs.resources import WikidataResource, LastFmResource
+
+# --- Music Domain Constants ---
+WIKIDATA_PROP_COUNTRY = ["P495", "P27"]
+WIKIDATA_PROP_GENRE = ["P136", "P101"]
+WIKIDATA_PROP_MBID = "P434"
+
+
 async def _enrich_artist_batch(
     artist_batch: list[dict[str, Any]],
     context: AssetExecutionContext,
@@ -59,7 +91,14 @@ async def _enrich_artist_batch(
 
     # 1. Fetch Wikidata entities
     wikidata_entities = await async_fetch_wikidata_entities_batch(
-        context, clean_qids, client=client
+        context, 
+        clean_qids, 
+        api_url=settings.WIKIDATA_ACTION_API_URL,
+        cache_dir=settings.WIKIDATA_CACHE_DIRPATH,
+        timeout=settings.WIKIDATA_ACTION_REQUEST_TIMEOUT,
+        rate_limit_delay=settings.WIKIDATA_ACTION_RATE_LIMIT_DELAY,
+        headers=settings.DEFAULT_REQUEST_HEADERS,
+        client=client
     )
 
     # 2. Collect metadata and resolve countries
@@ -94,7 +133,14 @@ async def _enrich_artist_batch(
 
     # 3. Resolve Labels for Countries
     labels_map = await async_resolve_qids_to_labels(
-        context, list(qids_to_resolve), client=client
+        context, 
+        list(qids_to_resolve), 
+        api_url=settings.WIKIDATA_ACTION_API_URL,
+        cache_dir=settings.WIKIDATA_CACHE_DIRPATH,
+        timeout=settings.WIKIDATA_ACTION_REQUEST_TIMEOUT,
+        rate_limit_delay=settings.WIKIDATA_ACTION_RATE_LIMIT_DELAY,
+        headers=settings.DEFAULT_REQUEST_HEADERS,
+        client=client
     )
 
     enriched_artists = []
@@ -136,6 +182,10 @@ async def _enrich_artist_batch(
                 },
                 mbid,
                 api_key=lastfm.api_key,
+                api_url=settings.LASTFM_API_URL,
+                cache_dir=settings.LAST_FM_CACHE_DIRPATH,
+                timeout=settings.LASTFM_REQUEST_TIMEOUT,
+                rate_limit_delay=settings.LASTFM_RATE_LIMIT_DELAY,
                 client=client
             )
         
@@ -149,6 +199,10 @@ async def _enrich_artist_batch(
                 },
                 name,
                 api_key=lastfm.api_key,
+                api_url=settings.LASTFM_API_URL,
+                cache_dir=settings.LAST_FM_CACHE_DIRPATH,
+                timeout=settings.LASTFM_REQUEST_TIMEOUT,
+                rate_limit_delay=settings.LASTFM_RATE_LIMIT_DELAY,
                 client=client
             )
             
@@ -163,6 +217,10 @@ async def _enrich_artist_batch(
                     },
                     alias,
                     api_key=lastfm.api_key,
+                    api_url=settings.LASTFM_API_URL,
+                    cache_dir=settings.LAST_FM_CACHE_DIRPATH,
+                    timeout=settings.LASTFM_REQUEST_TIMEOUT,
+                    rate_limit_delay=settings.LASTFM_RATE_LIMIT_DELAY,
                     client=client
                 )
                 if lastfm_data and "error" not in lastfm_data:
@@ -218,45 +276,47 @@ async def extract_artists(
     context: AssetExecutionContext, 
     wikidata: WikidataResource, 
     lastfm: LastFmResource,
-    artist_index: pl.DataFrame
-) -> pl.DataFrame:
+    artist_index: pl.LazyFrame
+) -> pl.LazyFrame:
     """
     Enriches all artists from the merged index.
+    Returns a Polars LazyFrame backed by a temporary JSONL file.
     """
     context.log.info("Starting artist enrichment for full index.")
 
-    # Use input DataFrame directly
-    artists_list = artist_index.to_dicts()
+    # Temp file for streaming results
+    temp_file = settings.DATASETS_DIRPATH / ".temp" / f"artists_{uuid.uuid4()}.jsonl"
+    temp_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Wrap the processor to match signature
-    async def process_batch_wrapper(
-        batch: list[dict[str, Any]], client: httpx.AsyncClient
-    ) -> list[Artist]:
-        return await _enrich_artist_batch(batch, context, lastfm, client)
+    # 1. Get Total Count for Loop
+    # We collect only the count, which is O(1) memory
+    total_rows = artist_index.select(pl.len()).collect().item()
+    context.log.info(f"Total artists to process: {total_rows}")
 
-    # Process batches concurrently
-    async with wikidata.yield_for_execution(context) as client:
-        artist_stream = yield_batches_concurrently(
-            items=artists_list,
-            batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
-            processor_fn=process_batch_wrapper,
-            concurrency_limit=1,
-            description="Processing Artist Batches",
-            timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
-            client=client,
-        )
+    if total_rows == 0:
+        return pl.LazyFrame()
 
-        # Collect results
-        context.log.info("Collecting enriched artists.")
-        enriched_artists_dicts = [
-            msgspec.to_builtins(a) 
-            async for a in deduplicate_stream(artist_stream, key_attr="id")
-        ]
-
-    context.log.info(f"Enriched {len(enriched_artists_dicts)} artists.")
+    batch_size = settings.WIKIDATA_ACTION_BATCH_SIZE
     
-    context.add_output_metadata({
-        "artist_count": len(enriched_artists_dicts)
-    })
+    async with wikidata.get_client(context) as client:
+        # 2. Iterate Batches using Slicing
+        for offset in range(0, total_rows, batch_size):
+            context.log.info(f"Processing batch offset {offset}/{total_rows}")
+            
+            # Efficiently fetch only the current batch from source
+            batch_df = artist_index.slice(offset, batch_size).collect()
+            batch_items = batch_df.to_dicts()
+            
+            # Enrich Batch
+            enriched_batch = await _enrich_artist_batch(
+                batch_items, context, lastfm, client
+            )
+            
+            # Write Batch to Disk (Stream)
+            await async_append_jsonl(temp_file, enriched_batch)
+
+    context.log.info(f"Enriched artists saved to {temp_file}")
     
-    return pl.DataFrame(enriched_artists_dicts)
+    # Return LazyFrame pointing to the streamed file
+    # Ensure we use scan_ndjson as we wrote JSONL
+    return pl.scan_ndjson(str(temp_file))

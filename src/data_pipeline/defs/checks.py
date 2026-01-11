@@ -12,11 +12,33 @@ from dagster import AssetCheckResult, asset_check
 
 
 @asset_check(asset="artist_index")
-def check_artist_index_integrity(artist_index: pl.DataFrame):
+def check_artist_index_integrity(artist_index: pl.LazyFrame):
     """Checks that the artist index has no null IDs or names and no duplicates."""
-    null_ids = artist_index["artist_uri"].null_count()
-    null_names = artist_index["name"].null_count()
-    duplicate_count = artist_index.is_duplicated().sum()
+    # Compute stats lazily
+    stats = artist_index.select([
+        pl.col("artist_uri").null_count().alias("null_ids"),
+        pl.col("name").null_count().alias("null_names"),
+        pl.len().alias("total_count")
+    ]).collect().to_dicts()[0]
+
+    # Check for duplicates: Count rows where count > 1 group by all columns
+    # Note: Checking duplicates on all columns might be expensive if columns are many/large.
+    # Assuming 'artist_uri' should be unique primary key for this index?
+    # The original check used `is_duplicated()` on the whole frame.
+    # We will replicate strict "all columns" duplicate check.
+    
+    dup_check = (
+        artist_index.group_by(artist_index.collect_schema().names())
+        .len()
+        .filter(pl.col("len") > 1)
+        .select(pl.col("len").sum())
+        .collect()
+        .item()
+    )
+    duplicate_count = dup_check if dup_check is not None else 0
+    
+    null_ids = stats["null_ids"]
+    null_names = stats["null_names"]
     
     return AssetCheckResult(
         passed=bool(null_ids == 0 and null_names == 0 and duplicate_count == 0),
@@ -29,16 +51,23 @@ def check_artist_index_integrity(artist_index: pl.DataFrame):
 
 
 @asset_check(asset="artists")
-def check_artists_completeness(artists: pl.DataFrame):
+def check_artists_completeness(artists: pl.LazyFrame):
     """Checks that enriched artists have at least some genres or tags assigned."""
-    total_artists = len(artists)
+    # We use select with aggregation to get counts in one go
+    stats = artists.select([
+        pl.len().alias("total"),
+        pl.col("genres").list.len().fill_null(0).alias("genre_len"),
+        pl.col("tags").list.len().fill_null(0).alias("tag_len")
+    ]).select([
+        pl.col("total").first(),
+        ((pl.col("genre_len") > 0) | (pl.col("tag_len") > 0)).sum().alias("with_metadata")
+    ]).collect().to_dicts()[0]
+
+    total_artists = stats["total"]
     if total_artists == 0:
         return AssetCheckResult(passed=True, description="No artists to check.")
         
-    artists_with_metadata = artists.filter(
-        (pl.col("genres").list.len() > 0) | (pl.col("tags").list.len() > 0)
-    )
-    completeness_ratio = len(artists_with_metadata) / total_artists
+    completeness_ratio = stats["with_metadata"] / total_artists
     
     return AssetCheckResult(
         passed=bool(completeness_ratio > 0.5),  # Expect at least 50% to have some metadata
@@ -47,12 +76,20 @@ def check_artists_completeness(artists: pl.DataFrame):
 
 
 @asset_check(asset="albums")
-def check_albums_per_artist(albums: pl.DataFrame):
+def check_albums_per_artist(albums: pl.LazyFrame):
     """Checks that we have a reasonable average of albums per artist."""
-    if albums.is_empty():
+    stats = albums.select([
+        pl.len().alias("count"),
+        pl.col("artist_id").n_unique().alias("unique_artists")
+    ]).collect().to_dicts()[0]
+    
+    count = stats["count"]
+    unique_artists = stats["unique_artists"]
+
+    if count == 0:
         return AssetCheckResult(passed=True)
         
-    avg_albums = len(albums) / albums["artist_id"].n_unique()
+    avg_albums = count / unique_artists if unique_artists > 0 else 0
     
     return AssetCheckResult(
         passed=bool(avg_albums >= 1.0),
@@ -61,10 +98,15 @@ def check_albums_per_artist(albums: pl.DataFrame):
 
 
 @asset_check(asset="tracks")
-def check_tracks_schema(tracks: pl.DataFrame):
+def check_tracks_schema(tracks: pl.LazyFrame):
     """Checks that tracks have titles and valid album links."""
-    null_titles = tracks["title"].null_count()
-    null_albums = tracks["album_id"].null_count()
+    stats = tracks.select([
+        pl.col("title").null_count().alias("null_titles"),
+        pl.col("album_id").null_count().alias("null_albums")
+    ]).collect().to_dicts()[0]
+    
+    null_titles = stats["null_titles"]
+    null_albums = stats["null_albums"]
     
     return AssetCheckResult(
         passed=bool(null_titles == 0 and null_albums == 0),
@@ -73,9 +115,9 @@ def check_tracks_schema(tracks: pl.DataFrame):
 
 
 @asset_check(asset="genres")
-def check_genres_quality(genres: pl.DataFrame):
+def check_genres_quality(genres: pl.LazyFrame):
     """Checks that genres have names and a reasonable amount of metadata."""
-    null_names = genres["name"].null_count()
+    null_names = genres.select(pl.col("name").null_count()).collect().item()
     return AssetCheckResult(
         passed=bool(null_names == 0),
         metadata={"null_names": null_names}

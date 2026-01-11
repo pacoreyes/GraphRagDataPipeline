@@ -10,7 +10,8 @@
 import asyncio
 from typing import Any, Callable, Coroutine, Optional, TypeVar, AsyncIterable, Iterable, Union
 
-import httpx
+from httpx import AsyncClient, HTTPError, Response
+
 from dagster import AssetExecutionContext
 from tqdm.asyncio import tqdm_asyncio
 from tqdm.asyncio import tqdm
@@ -28,8 +29,9 @@ async def make_async_request_with_retries(
     max_retries: int = 5,
     initial_backoff: int = 2,
     timeout: int = 60,
-    client: Optional[httpx.AsyncClient] = None,
-) -> httpx.Response:
+    rate_limit_delay: float = 0.0,
+    client: Optional[AsyncClient] = None,
+) -> Response:
     """
     Executes an asynchronous HTTP request with an exponential backoff retry strategy.
 
@@ -42,14 +44,18 @@ async def make_async_request_with_retries(
         max_retries (int): Maximum retries.
         initial_backoff (int): Initial backoff seconds.
         timeout (int): Request timeout seconds.
-        client (Optional[httpx.AsyncClient]): Optional existing client to reuse.
+        rate_limit_delay (float): Optional delay before the request for rate limiting.
+        client (Optional[AsyncClient]): Optional existing client to reuse.
 
     Returns:
-        httpx.Response: The successful response.
+        Response: The successful response.
     """
+    if rate_limit_delay > 0:
+        await asyncio.sleep(rate_limit_delay)
+
     should_close_client = False
     if client is None:
-        client = httpx.AsyncClient(timeout=timeout)
+        client = AsyncClient(timeout=timeout)
         should_close_client = True
 
     try:
@@ -67,7 +73,7 @@ async def make_async_request_with_retries(
                 response.raise_for_status()
                 return response
 
-            except httpx.HTTPError as error:
+            except HTTPError as error:
                 wait_time = initial_backoff * (2**attempt)
                 context.log.warning(
                     f"Async Attempt {attempt + 1}/{max_retries} for {method} {url} failed: {error}. "
@@ -81,7 +87,7 @@ async def make_async_request_with_retries(
         if should_close_client:
             await client.aclose()
 
-    raise httpx.HTTPError(
+    raise HTTPError(
         f"Failed to fetch data using {method} for {url} after {max_retries} retries."
     )
 
@@ -117,11 +123,11 @@ async def run_tasks_concurrently(
 async def yield_batches_concurrently(
     items: list[T],
     batch_size: int,
-    processor_fn: Callable[[list[T], httpx.AsyncClient], Coroutine[Any, Any, list[R]]],
+    processor_fn: Callable[[list[T], AsyncClient], Coroutine[Any, Any, list[R]]],
     concurrency_limit: int,
     description: str = "Processing Batches",
     timeout: int = 60,
-    client: Optional[httpx.AsyncClient] = None,
+    client: Optional[AsyncClient] = None,
 ) -> AsyncIterable[R]:
     """
     Processes a list of items in batches concurrently and yields results as they complete.
@@ -140,7 +146,7 @@ async def yield_batches_concurrently(
     semaphore = asyncio.Semaphore(concurrency_limit)
     should_close_client = False
     if client is None:
-        client = httpx.AsyncClient(timeout=timeout)
+        client = AsyncClient(timeout=timeout)
         should_close_client = True
     try:
         async def worker(batch: list[T]) -> list[R]:

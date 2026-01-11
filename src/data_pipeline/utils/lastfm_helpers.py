@@ -7,24 +7,17 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-"""
-Last.fm API Helpers (Infrastructure Layer)
-Generic functions for interacting with Last.fm API with caching.
-"""
-import asyncio
 import hashlib
-import json
 from typing import Any, Optional
+from pathlib import Path
 
-import httpx
 from dagster import AssetExecutionContext
 
-from data_pipeline.settings import settings
 from data_pipeline.utils.network_helpers import (
     make_async_request_with_retries,
+    AsyncClient,
 )
-
-LASTFM_CACHE_DIR = settings.lastfm_cache_dirpath
+from data_pipeline.utils.io_helpers import async_read_json_file, async_write_json_file
 
 
 def get_cache_key(text: str) -> str:
@@ -32,17 +25,11 @@ def get_cache_key(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-async def _async_cache_lastfm_data(key: str, data: dict[str, Any]) -> None:
+async def _async_cache_lastfm_data(key: str, data: dict[str, Any], cache_dir: Path) -> None:
     """Helper function to cache Last.fm data asynchronously."""
     cache_key = get_cache_key(key.lower())
-    cache_file = LASTFM_CACHE_DIR / f"{cache_key}.json"
-    await asyncio.to_thread(LASTFM_CACHE_DIR.mkdir, parents=True, exist_ok=True)
-
-    def write_json():
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-
-    await asyncio.to_thread(write_json)
+    cache_file = cache_dir / f"{cache_key}.json"
+    await async_write_json_file(cache_file, data)
 
 
 async def async_fetch_lastfm_data_with_cache(
@@ -50,36 +37,29 @@ async def async_fetch_lastfm_data_with_cache(
     params: dict[str, Any],
     cache_key_source: str,
     api_key: str,
-    client: Optional[httpx.AsyncClient] = None,
+    api_url: str,
+    cache_dir: Path,
+    client: Optional[AsyncClient] = None,
+    timeout: int = 60,
+    rate_limit_delay: float = 0.0,
 ) -> Optional[dict[str, Any]]:
     """
     Generic Last.fm API fetcher with local file caching.
     """
-    api_url = settings.LASTFM_API_URL
-
     if not all([api_key, api_url]):
         context.log.warning("Last.fm API key or URL not provided. Skipping fetch.")
         return None
 
     cache_key_str = get_cache_key(cache_key_source.lower())
-    cache_file = LASTFM_CACHE_DIR / f"{cache_key_str}.json"
+    cache_file = cache_dir / f"{cache_key_str}.json"
 
-    if await asyncio.to_thread(cache_file.exists):
-        try:
-            def read_json():
-                with open(cache_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            data = await asyncio.to_thread(read_json)
-            if "error" not in data:
-                return data
-        except (OSError, json.JSONDecodeError):
-            pass
+    # 1. Check Cache
+    cached_data = await async_read_json_file(cache_file)
+    if cached_data and "error" not in cached_data:
+        return cached_data
 
-    # Fetch from API
+    # 2. Fetch from API
     try:
-        if settings.LASTFM_RATE_LIMIT_DELAY > 0:
-            await asyncio.sleep(settings.LASTFM_RATE_LIMIT_DELAY)
-
         # Merge api_key into params
         request_params = {**params, "api_key": api_key, "format": "json"}
 
@@ -88,17 +68,18 @@ async def async_fetch_lastfm_data_with_cache(
             url=api_url,
             method="GET",
             params=request_params,
-            timeout=settings.LASTFM_REQUEST_TIMEOUT,
+            timeout=timeout,
+            rate_limit_delay=rate_limit_delay,
             client=client,
         )
         data = response.json()
         
         if data and "error" not in data:
-            await _async_cache_lastfm_data(cache_key_source, data)
+            await _async_cache_lastfm_data(cache_key_source, data, cache_dir)
             return data
         elif data and "error" in data:
             # Cache the error to avoid re-querying failing entities
-            await _async_cache_lastfm_data(cache_key_source, data)
+            await _async_cache_lastfm_data(cache_key_source, data, cache_dir)
             
         return data
     except Exception as e:

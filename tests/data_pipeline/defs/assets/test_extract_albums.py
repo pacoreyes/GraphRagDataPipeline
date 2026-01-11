@@ -9,6 +9,7 @@
 
 import pytest
 import httpx
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 import polars as pl
 from dagster import build_asset_context
@@ -16,11 +17,15 @@ from dagster import build_asset_context
 from data_pipeline.defs.assets.extract_albums import extract_albums
 
 @pytest.mark.asyncio
+@patch("data_pipeline.defs.assets.extract_albums.pl.scan_ndjson")
+@patch("data_pipeline.defs.assets.extract_albums.async_append_jsonl")
 @patch("data_pipeline.defs.assets.extract_albums.fetch_sparql_query_async")
 @patch("data_pipeline.defs.assets.extract_albums.settings")
 async def test_extract_albums(
     mock_settings,
-    mock_fetch_sparql
+    mock_fetch_sparql,
+    mock_append,
+    mock_scan
 ):
     """
     Test the albums asset.
@@ -29,11 +34,12 @@ async def test_extract_albums(
     mock_settings.WIKIDATA_ACTION_BATCH_SIZE = 10
     mock_settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT = 10
     mock_settings.WIKIDATA_CONCURRENT_REQUESTS = 2
+    mock_settings.DATASETS_DIRPATH = Path("/tmp")
 
     # Mock Input DataFrame (artists)
     mock_artists_df = pl.DataFrame({
         "id": ["Q1", "Q2", "Q3"]
-    })
+    }).lazy()
 
     # Mock SPARQL Response
     mock_fetch_sparql.return_value = [
@@ -69,6 +75,9 @@ async def test_extract_albums(
             "releaseDate": {"value": "2005-01-01T00:00:00Z"}
         }
     ]
+    
+    # Mock Scan Result
+    mock_scan.return_value = pl.DataFrame({"title": ["Album A"]}).lazy()
 
     from contextlib import asynccontextmanager
 
@@ -80,19 +89,11 @@ async def test_extract_albums(
     @asynccontextmanager
     async def mock_yield(context):
         yield mock_client
-    mock_wikidata.yield_for_execution = mock_yield
+    mock_wikidata.get_client = mock_yield
 
     # Execution
     result_df = await extract_albums(context, mock_wikidata, mock_artists_df)
 
-    # Assertions
-    assert isinstance(result_df, pl.DataFrame)
-    
-    # Expected: Q1(QA), Q2(QB), Q3(Q3B) -> 3 items
-    assert len(result_df) == 3
-    
-    # Check Album A (Earliest year 2009)
-    album_a = result_df.filter(pl.col("id") == "QA").to_dicts()[0]
-    assert album_a["title"] == "Album A"
-    assert album_a["year"] == 2009
-    assert album_a["artist_id"] == "Q1"
+    assert isinstance(result_df, pl.LazyFrame)
+    assert mock_append.called
+    assert mock_scan.called

@@ -1,5 +1,5 @@
 # -----------------------------------------------------------
-# Graph DB Helpers (Neo4j)
+# Neo4j Helpers
 # Dagster Data pipeline for Structured and Unstructured Data
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
@@ -7,55 +7,10 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from typing import Any, Optional, LiteralString, cast
+from typing import Any, LiteralString, cast
 
-from dagster import Config, AssetExecutionContext, EnvVar
-from neo4j import GraphDatabase, Driver
-from pydantic import Field
-
-
-class Neo4jConfig(Config):
-    """Configuration for Neo4j connection."""
-    uri: str = Field(
-        default=EnvVar("NEO4J_URI"), 
-        description="Neo4j URI (e.g., neo4j+s://...)."
-    )
-    username: str = Field(
-        default=EnvVar("NEO4J_USERNAME"), 
-        description="Neo4j username."
-    )
-    password: str = Field(
-        default=EnvVar("NEO4J_PASSWORD"), 
-        description="Neo4j password."
-    )
-
-
-def get_neo4j_driver(config: Optional[Neo4jConfig] = None) -> Driver:
-    """
-    Initializes and returns a Neo4j driver based on the configuration.
-
-    Args:
-        config: The Neo4j configuration object. If None, uses defaults from EnvVars.
-
-    Returns:
-        A Neo4j Driver instance.
-    """
-    if config:
-        uri = config.uri
-        username = config.username
-        password = config.password
-    else:
-        # Fallback to manual EnvVar resolution if no config provided (for scripts)
-        # Dagster EnvVar objects resolve to their value when cast to string or accessed,
-        # but here we should handle them or let the driver handle the string values.
-        # Actually, Neo4jConfig already has EnvVar defaults. 
-        # If we instantiate it without args, it resolves them.
-        resolved_config = Neo4jConfig()
-        uri = resolved_config.uri
-        username = resolved_config.username
-        password = resolved_config.password
-    
-    return GraphDatabase.driver(uri, auth=(username, password))
+from dagster import AssetExecutionContext
+from neo4j import Driver
 
 
 def execute_cypher(
@@ -124,30 +79,3 @@ def clear_database(driver: Driver, context: AssetExecutionContext) -> None:
     except Exception as e:
         context.log.error(f"Error during database cleanup: {e}")
         raise e
-
-
-def create_indexes(driver: Driver, context: AssetExecutionContext) -> None:
-    """
-    Creates necessary indexes in Neo4j to optimize query performance.
-    """
-    context.log.info("Creating indexes...")
-    
-    # noinspection SqlNoDataSourceInspection
-    index_commands = [
-        "CREATE INDEX artist_id_idx IF NOT EXISTS FOR (n:Artist) ON (n.id)",
-        "CREATE INDEX artist_name_idx IF NOT EXISTS FOR (n:Artist) ON (n.name)",
-        "CREATE INDEX album_id_idx IF NOT EXISTS FOR (n:Album) ON (n.id)",
-        "CREATE INDEX album_artist_id_idx IF NOT EXISTS FOR (n:Album) ON (n.artist_id)",
-        "CREATE INDEX track_id_idx IF NOT EXISTS FOR (n:Track) ON (n.id)",
-        "CREATE INDEX track_album_id_idx IF NOT EXISTS FOR (n:Track) ON (n.album_id)",
-        "CREATE INDEX genre_id_idx IF NOT EXISTS FOR (n:Genre) ON (n.id)",
-        "CREATE INDEX genre_name_idx IF NOT EXISTS FOR (n:Genre) ON (n.name)",
-    ]
-
-    for cmd in index_commands:
-        try:
-            execute_cypher(driver, cmd)
-            context.log.info(f"Executed: {cmd}")
-        except Exception as e:
-            context.log.error(f"Failed to execute '{cmd}': {e}")
-            raise e

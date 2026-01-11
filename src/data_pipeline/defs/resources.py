@@ -45,7 +45,7 @@ class Neo4jResource(ConfigurableResource):
     password: str
 
     @contextmanager
-    def yield_for_execution(self, context) -> Generator[Driver, None, None]:
+    def get_driver(self, context) -> Generator[Driver, None, None]:
         driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password))
         try:
             yield driver
@@ -61,7 +61,7 @@ class WikidataResource(ConfigurableResource):
     timeout: int
 
     @asynccontextmanager
-    async def yield_for_execution(self, context) -> AsyncGenerator[httpx.AsyncClient, None]:
+    async def get_client(self, context) -> AsyncGenerator[httpx.AsyncClient, None]:
         async with httpx.AsyncClient(
             headers={"User-Agent": self.user_agent},
             timeout=self.timeout
@@ -71,8 +71,12 @@ class WikidataResource(ConfigurableResource):
 
 # Base resources
 resource_defs: dict[str, Any] = {
-    "lastfm": LastFmResource(api_key=EnvVar("LASTFM_API_KEY")),
-    "nomic": NomicResource(api_key=EnvVar("NOMIC_API_KEY")),
+    "lastfm": LastFmResource(
+        api_key=EnvVar("LASTFM_API_KEY")
+    ),
+    "nomic": NomicResource(
+        api_key=EnvVar("NOMIC_API_KEY")
+    ),
     "neo4j": Neo4jResource(
         uri=EnvVar("NEO4J_URI"),
         username=EnvVar("NEO4J_USERNAME"),
@@ -82,7 +86,7 @@ resource_defs: dict[str, Any] = {
         user_agent=settings.USER_AGENT,
         timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT
     ),
-    "io_manager": PolarsJSONLIOManager(base_dir=str(settings.datasets_dirpath))
+    "io_manager": PolarsJSONLIOManager(base_dir=str(settings.DATASETS_DIRPATH))
 }
 
 # Export as Definitions for automatic loading

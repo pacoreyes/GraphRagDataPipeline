@@ -36,15 +36,13 @@ def test_directory_auto_creation(tmp_path):
     test_settings = TestSettings()
     
     # Check if directories were created
-    assert test_settings.wikipedia_cache_dirpath.exists()
-    assert test_settings.wikidata_cache_dirpath.exists()
-    assert test_settings.lastfm_cache_dirpath.exists()
-    assert test_settings.temp_dirpath.exists()
-    assert test_settings.datasets_dirpath.exists()
-    assert test_settings.vector_db_dirpath.exists()
+    assert test_settings.WIKIPEDIA_CACHE_DIRPATH.exists()
+    assert test_settings.WIKIDATA_CACHE_DIRPATH.exists()
+    assert test_settings.LAST_FM_CACHE_DIRPATH.exists()
+    assert test_settings.DATASETS_DIRPATH.exists()
 
 def test_default_values():
     settings = Settings()
     assert settings.WIKIDATA_SPARQL_BATCH_SIZE == 500
-    assert "User-Agent" in settings.default_request_headers
+    assert "User-Agent" in settings.DEFAULT_REQUEST_HEADERS
     assert settings.DEFAULT_COLLECTION_NAME == "music_rag_collection"

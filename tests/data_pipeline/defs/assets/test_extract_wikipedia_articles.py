@@ -30,7 +30,7 @@ async def test_extract_wikipedia_articles_flow():
     ])
 
     # Mock Wikidata Entity Fetch
-    async def mock_fetch_entities(context, qids, client=None):
+    async def mock_fetch_entities(context, qids, client=None, **kwargs):
         result = {}
         if "Q1" in qids:
             result["Q1"] = {
@@ -63,7 +63,7 @@ async def test_extract_wikipedia_articles_flow():
         @asynccontextmanager
         async def mock_yield(context):
             yield mock_client
-        mock_wikidata.yield_for_execution = mock_yield
+        mock_wikidata.get_client = mock_yield
 
         # Run Asset
         result_df = await extract_wikipedia_articles(context, mock_wikidata, artists_df, genres_df, index_df)

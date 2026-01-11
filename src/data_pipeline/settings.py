@@ -9,7 +9,7 @@
 
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,75 +30,19 @@ class Settings(BaseSettings):
     # Top-level directory for all data, caches, temp, databases, and datasets
     DATA_DIR: Path = PROJECT_DIR / "data_volume"
 
-    # Cache Directories
-    @property
-    def wikipedia_cache_dirpath(self) -> Path:
-        return self.DATA_DIR / ".cache" / "wikipedia"
-
-    @property
-    def wikidata_cache_dirpath(self) -> Path:
-        return self.DATA_DIR / ".cache" / "wikidata"
-
-    @property
-    def lastfm_cache_dirpath(self) -> Path:
-        return self.DATA_DIR / ".cache" / "last_fm"
-
-    # Temp Directory
-    @property
-    def temp_dirpath(self) -> Path:
-        return self.DATA_DIR / ".temp"
+    # Define fields for directories
+    WIKIPEDIA_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
+    WIKIDATA_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
+    LAST_FM_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
+    DATASETS_DIRPATH: Path | None = Field(default=None, init=False)
 
     # ==============================================================================
-    #  DATABASE PATHS & SETTINGS
+    #  VECTOR DATABASE SETTINGS
     # ==============================================================================
-
-    # Vector DB - Chroma
-    @property
-    def vector_db_dirpath(self) -> Path:
-        return self.DATA_DIR / "vector_db"
 
     # ChromaDB
     DEFAULT_EMBEDDINGS_MODEL_NAME: str = "nomic-ai/nomic-embed-text-v1.5"
     DEFAULT_COLLECTION_NAME: str = "music_rag_collection"
-
-    # ==============================================================================
-    #  DATASETS PATHS
-    # ==============================================================================
-
-    # Datasets Directory
-    @property
-    def datasets_dirpath(self) -> Path:
-        return self.DATA_DIR / "datasets"
-
-    # Artist Index
-    @property
-    def artist_index_filepath(self) -> Path:
-        return self.datasets_dirpath / "artist_index.jsonl"
-
-    # Wikipedia Articles Dataset
-    @property
-    def wikipedia_articles_filepath(self) -> Path:
-        return self.datasets_dirpath / "wikipedia_articles.jsonl"
-
-    # Artists Dataset
-    @property
-    def artists_filepath(self) -> Path:
-        return self.datasets_dirpath / "artists.jsonl"
-
-    # Genres Dataset
-    @property
-    def genres_filepath(self) -> Path:
-        return self.datasets_dirpath / "genres.jsonl"
-
-    # Albums Dataset
-    @property
-    def albums_filepath(self) -> Path:
-        return self.datasets_dirpath / "albums.jsonl"
-
-    # Tracks Dataset
-    @property
-    def tracks_filepath(self) -> Path:
-        return self.datasets_dirpath / "tracks.jsonl"
 
     # ==============================================================================
     #  API & SERVICE CONFIGURATION
@@ -118,14 +62,7 @@ class Settings(BaseSettings):
 
     # Bot's public identity (Polite for APIs)
     USER_AGENT: str = "Nodes AI (info@nodesAI.de)"
-
-    # HTTP requests headers
-    @property
-    def default_request_headers(self) -> dict[str, str]:
-        return {
-            "User-Agent": self.USER_AGENT,
-            "Accept": "application/json",
-        }
+    DEFAULT_REQUEST_HEADERS: dict[str, str] | None = Field(default=None, init=False)
 
     # ==============================================================================
     #  API PROCESSING PARAMETERS
@@ -157,17 +94,28 @@ class Settings(BaseSettings):
     #  AUTO-CREATION DIRS
     # ==============================================================================
     @model_validator(mode='after')
-    def _create_directories(self):
+    def _compute_and_create_paths(self):
+        # Assign directory values
+        self.WIKIPEDIA_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "wikipedia"
+        self.WIKIDATA_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "wikidata"
+        self.LAST_FM_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "last_fm"
+        self.DATASETS_DIRPATH = self.DATA_DIR / "datasets"
+
+        # Create directories if they don't exist
         dirs_to_create = [
-            self.wikipedia_cache_dirpath,
-            self.wikidata_cache_dirpath,
-            self.lastfm_cache_dirpath,
-            self.temp_dirpath,
-            self.datasets_dirpath,
-            self.vector_db_dirpath
+            self.WIKIPEDIA_CACHE_DIRPATH,
+            self.WIKIDATA_CACHE_DIRPATH,
+            self.LAST_FM_CACHE_DIRPATH,
+            self.DATASETS_DIRPATH,
         ]
         for directory in dirs_to_create:
             directory.mkdir(parents=True, exist_ok=True)
+
+        self.DEFAULT_REQUEST_HEADERS = {
+            "User-Agent": self.USER_AGENT,
+            "Accept": "application/json",
+        }
+
         return self
 
     # ==============================================================================

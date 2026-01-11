@@ -30,14 +30,11 @@ from data_pipeline.utils.wikipedia_helpers import (
 )
 from data_pipeline.defs.resources import WikidataResource
 
-# --- Domain Constants ---
+
 WIKIPEDIA_EXCLUSION_HEADERS = [
     "References",
     "External links",
-    "See also",
-    # "Further reading",
-    # "Notes",
-    # "Discography"
+    "See also"
 ]
 
 
@@ -111,7 +108,15 @@ async def extract_wikipedia_articles(
             
         title = wiki_url.split("/")[-1]
         
-        raw_text = await async_fetch_wikipedia_article(context, title, qid=qid, client=client)
+        raw_text = await async_fetch_wikipedia_article(
+            context, 
+            title, 
+            qid=qid, 
+            api_url=settings.WIKIPEDIA_API_URL,
+            cache_dir=settings.WIKIPEDIA_CACHE_DIRPATH,
+            headers=settings.DEFAULT_REQUEST_HEADERS,
+            client=client
+        )
         
         if not raw_text:
             return []
@@ -149,7 +154,16 @@ async def extract_wikipedia_articles(
         batch: list[Dict[str, Any]], client: httpx.AsyncClient
     ) -> list[Article]:
         qids = [str(row.get("id") or "") for row in batch]
-        entities = await async_fetch_wikidata_entities_batch(context, qids, client)
+        entities = await async_fetch_wikidata_entities_batch(
+            context, 
+            qids, 
+            api_url=settings.WIKIDATA_ACTION_API_URL,
+            cache_dir=settings.WIKIDATA_CACHE_DIRPATH,
+            timeout=settings.WIKIDATA_ACTION_REQUEST_TIMEOUT,
+            rate_limit_delay=settings.WIKIDATA_ACTION_RATE_LIMIT_DELAY,
+            headers=settings.DEFAULT_REQUEST_HEADERS,
+            client=client
+        )
         
         tasks = []
         for row in batch:
@@ -167,7 +181,7 @@ async def extract_wikipedia_articles(
         return [item for sublist in results_nested for item in sublist]
 
     # 4. Execution Loop
-    async with wikidata.yield_for_execution(context) as client:
+    async with wikidata.get_client(context) as client:
         article_stream = yield_batches_concurrently(
             items=rows_to_process,
             batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,

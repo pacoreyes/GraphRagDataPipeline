@@ -7,46 +7,42 @@
 # email pacoreyes@protonmail.com
 # ----------------------------------------------------------- 
 
-import asyncio
-import hashlib
 import urllib.parse
+from pathlib import Path
 from typing import Optional
 
-import httpx
 from dagster import AssetExecutionContext
 
-from data_pipeline.settings import settings
-from data_pipeline.utils.network_helpers import make_async_request_with_retries
-
-WIKIPEDIA_CACHE_DIR = settings.wikipedia_cache_dirpath
+from data_pipeline.utils.network_helpers import (
+    make_async_request_with_retries,
+    AsyncClient,
+    HTTPError,
+)
+from data_pipeline.utils.io_helpers import async_read_text_file, async_write_text_file
 
 
 async def async_fetch_wikipedia_article(
     context: AssetExecutionContext,
     title: str,
-    qid: Optional[str] = None,
-    client: Optional[httpx.AsyncClient] = None,
+    qid: str,
+    api_url: str,
+    cache_dir: Path,
+    headers: Optional[dict[str, str]] = None,
+    client: Optional[AsyncClient] = None,
 ) -> Optional[str]:
     """
     Fetches the raw plain text of a Wikipedia article by its title, with caching.
+    The QID is required to ensure consistent cache file naming (e.g., Q123.txt).
     """
     clean_title = urllib.parse.unquote(title).replace("_", " ")
     
-    # Generate cache key (SHA256 of title if QID not provided)
-    cache_key = qid if qid else hashlib.sha256(clean_title.encode("utf-8")).hexdigest()
-    cache_file = WIKIPEDIA_CACHE_DIR / f"{cache_key}.txt"
+    # Use QID for cache filename
+    cache_file = cache_dir / f"{qid}.txt"
     
     # 1. Check Cache
-    if await asyncio.to_thread(cache_file.exists):
-        try:
-            def read_file():
-                with open(cache_file, "r", encoding="utf-8") as f:
-                    return f.read()
-            content = await asyncio.to_thread(read_file)
-            if content:
-                return content
-        except OSError:
-            pass
+    cached_content = await async_read_text_file(cache_file)
+    if cached_content:
+        return cached_content
 
     # 2. Fetch from API
     params = {
@@ -61,10 +57,10 @@ async def async_fetch_wikipedia_article(
     try:
         response = await make_async_request_with_retries(
             context=context,
-            url=settings.WIKIPEDIA_API_URL,
+            url=api_url,
             method="GET",
             params=params,
-            headers=settings.default_request_headers,
+            headers=headers,
             client=client,
         )
         
@@ -78,16 +74,10 @@ async def async_fetch_wikipedia_article(
             extract = page_data.get("extract")
             if extract:
                 # 3. Save to Cache
-                await asyncio.to_thread(WIKIPEDIA_CACHE_DIR.mkdir, parents=True, exist_ok=True)
-
-                def write_file():
-                    with open(cache_file, "w", encoding="utf-8") as f:
-                        f.write(extract)
-
-                await asyncio.to_thread(write_file)
+                await async_write_text_file(cache_file, extract)
                 return extract
             
-    except (httpx.HTTPError, ValueError):
+    except (HTTPError, ValueError):
         return None
 
     return None

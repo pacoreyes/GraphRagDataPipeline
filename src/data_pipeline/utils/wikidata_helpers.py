@@ -8,19 +8,23 @@
 # -----------------------------------------------------------
 
 import asyncio
+from pathlib import Path
 from typing import Any, Callable, Optional
 
-import httpx
-import msgspec
 from dagster import AssetExecutionContext
 
-from data_pipeline.settings import settings
 from data_pipeline.utils.network_helpers import (
     make_async_request_with_retries,
     run_tasks_concurrently,
+    AsyncClient,
+    HTTPError,
 )
-
-WIKIDATA_CACHE_DIR = settings.wikidata_cache_dirpath
+from data_pipeline.utils.io_helpers import (
+    async_read_json_file, 
+    async_write_json_file, 
+    decode_json, 
+    JSONDecodeError
+)
 
 
 async def run_extraction_pipeline(
@@ -28,15 +32,17 @@ async def run_extraction_pipeline(
     get_query_function: Callable[..., str],
     record_processor: Callable[[dict[str, Any]], Optional[dict[str, Any]]],
     label: str,
-    client: Optional[httpx.AsyncClient] = None,
+    sparql_endpoint: str,
+    batch_size: int,
+    concurrency_limit: int,
+    timeout: int = 60,
+    client: Optional[AsyncClient] = None,
     **query_params: Any,
 ) -> list[dict[str, Any]]:
     """
     Internal async function to run the extraction pipeline using concurrent pagination.
     Returns a list of processed records.
     """
-    batch_size = settings.WIKIDATA_SPARQL_BATCH_SIZE
-    concurrency_limit = settings.WIKIDATA_CONCURRENT_REQUESTS
     current_offset = 0
     all_records = []
     has_more_data = True
@@ -52,7 +58,13 @@ async def run_extraction_pipeline(
             query = get_query_function(
                 **query_params, limit=batch_size, offset=offset
             )
-            return await fetch_sparql_query_async(context, query, client=client)
+            return await fetch_sparql_query_async(
+                context, 
+                query, 
+                sparql_endpoint=sparql_endpoint,
+                timeout=timeout,
+                client=client
+            )
 
         results_batches = await run_tasks_concurrently(
             items=offsets_batch,
@@ -83,7 +95,10 @@ async def run_extraction_pipeline(
 async def fetch_sparql_query_async(
     context: AssetExecutionContext,
     query: str,
-    client: Optional[httpx.AsyncClient] = None,
+    sparql_endpoint: str,
+    headers: Optional[dict[str, str]] = None,
+    timeout: int = 60,
+    client: Optional[AsyncClient] = None,
 ) -> list[dict[str, Any]]:
     """
     Executes a SPARQL query against the Wikidata endpoint with retries asynchronously.
@@ -91,18 +106,19 @@ async def fetch_sparql_query_async(
     try:
         response = await make_async_request_with_retries(
             context=context,
-            url=settings.WIKIDATA_SPARQL_ENDPOINT,
+            url=sparql_endpoint,
             method="POST",
             params={"query": query, "format": "json"},
-            headers=settings.default_request_headers,
+            headers=headers,
+            timeout=timeout,
             client=client,
         )
-        data = msgspec.json.decode(response.content)
+        data = decode_json(response.content)
         return (data.get("results") or {}).get("bindings") or []
-    except httpx.HTTPError as e:
+    except HTTPError as e:
         context.log.error(f"An unrecoverable error occurred during SPARQL query: {e}")
         raise
-    except msgspec.DecodeError as e:
+    except JSONDecodeError as e:
         context.log.error(f"Error decoding JSON response from SPARQL query: {e}")
         raise
 
@@ -118,7 +134,14 @@ def get_sparql_binding_value(data: dict[str, Any], key: str) -> Any:
 async def async_fetch_wikidata_entities_batch(
     context: AssetExecutionContext,
     qids: list[str],
-    client: Optional[httpx.AsyncClient] = None,
+    api_url: str,
+    cache_dir: Path,
+    timeout: int = 60,
+    rate_limit_delay: float = 0.0,
+    concurrency_limit: int = 5,
+    action_batch_size: int = 50,
+    headers: Optional[dict[str, str]] = None,
+    client: Optional[AsyncClient] = None,
 ) -> dict[str, Any]:
     """
     Fetches entity data for a batch of QIDs from the Wikidata API (wbgetentities).
@@ -132,17 +155,10 @@ async def async_fetch_wikidata_entities_batch(
 
     # 1. Check Cache
     async def check_cache(qid: str) -> Optional[dict[str, Any]]:
-        cache_file = WIKIDATA_CACHE_DIR / f"{qid}.json"
-        if await asyncio.to_thread(cache_file.exists):
-            try:
-                def read_json():
-                    with open(cache_file, "rb") as f:
-                        return msgspec.json.decode(f.read())
-                data = await asyncio.to_thread(read_json)
-                if data and "sitelinks" in data:
-                    return data
-            except Exception as e:
-                context.log.warning(f"Failed to read cache for {qid}: {e}")
+        cache_file = cache_dir / f"{qid}.json"
+        data = await async_read_json_file(cache_file)
+        if data and "sitelinks" in data:
+            return data
         return None
 
     cache_results = await asyncio.gather(*[check_cache(qid) for qid in qids])
@@ -159,7 +175,7 @@ async def async_fetch_wikidata_entities_batch(
     context.log.info(f"Fetching {len(to_fetch)} entities from Wikidata API...")
 
     # 2. Fetch missing from API
-    chunk_size = settings.WIKIDATA_ACTION_BATCH_SIZE
+    chunk_size = action_batch_size
     chunks = [to_fetch[i: i + chunk_size] for i in range(0, len(to_fetch), chunk_size)]
 
     async def fetch_and_cache_chunk(chunk: list[str]) -> dict[str, Any]:
@@ -170,19 +186,16 @@ async def async_fetch_wikidata_entities_batch(
             "props": "claims|labels|aliases|descriptions|sitelinks",
             "languages": "en",
         }
-        url = settings.WIKIDATA_ACTION_API_URL
         
         try:
-            if settings.WIKIDATA_ACTION_RATE_LIMIT_DELAY > 0:
-                await asyncio.sleep(settings.WIKIDATA_ACTION_RATE_LIMIT_DELAY)
-
             response = await make_async_request_with_retries(
                 context=context,
-                url=url,
+                url=api_url,
                 method="GET",
                 params=params,
-                headers=settings.default_request_headers,
-                timeout=settings.WIKIDATA_ACTION_REQUEST_TIMEOUT,
+                headers=headers,
+                timeout=timeout,
+                rate_limit_delay=rate_limit_delay,
                 client=client,
             )
             data = response.json()
@@ -192,14 +205,8 @@ async def async_fetch_wikidata_entities_batch(
                 if "missing" in entity_data:
                     continue
                 
-                cache_file = WIKIDATA_CACHE_DIR / f"{qid}.json"
-
-                def save_json(d, p):
-                    p.parent.mkdir(parents=True, exist_ok=True)
-                    with open(p, "wb") as f:
-                        f.write(msgspec.json.encode(d))
-                
-                await asyncio.to_thread(save_json, entity_data, cache_file)
+                cache_file = cache_dir / f"{qid}.json"
+                await async_write_json_file(cache_file, entity_data)
             
             return entities
         except Exception as e:
@@ -209,7 +216,7 @@ async def async_fetch_wikidata_entities_batch(
     results = await run_tasks_concurrently(
         items=chunks,
         processor=fetch_and_cache_chunk,
-        concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
+        concurrency_limit=concurrency_limit,
         description="Fetching & Caching Wikidata Entities",
     )
 
@@ -222,10 +229,24 @@ async def async_fetch_wikidata_entities_batch(
 async def async_resolve_qids_to_labels(
     context: AssetExecutionContext,
     qids: list[str],
-    client: Optional[httpx.AsyncClient] = None,
+    api_url: str,
+    cache_dir: Path,
+    timeout: int = 60,
+    rate_limit_delay: float = 0.0,
+    headers: Optional[dict[str, str]] = None,
+    client: Optional[AsyncClient] = None,
 ) -> dict[str, str]:
     """Resolves a list of QIDs to their English labels."""
-    entities = await async_fetch_wikidata_entities_batch(context, qids, client)
+    entities = await async_fetch_wikidata_entities_batch(
+        context, 
+        qids, 
+        api_url=api_url, 
+        cache_dir=cache_dir, 
+        timeout=timeout, 
+        rate_limit_delay=rate_limit_delay,
+        headers=headers,
+        client=client
+    )
     labels = {}
     for qid, data in entities.items():
         label = extract_wikidata_label(data)

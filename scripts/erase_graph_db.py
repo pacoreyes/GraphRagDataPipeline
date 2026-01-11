@@ -18,14 +18,15 @@ Usage:
     python -m scripts.erase_graph_db
 """
 
+import os
 import sys
 from typing import Any
 
 from dagster import build_asset_context
-from data_pipeline.utils.graph_db_helpers import (
-    Neo4jConfig,
+from neo4j import GraphDatabase
+
+from data_pipeline.utils.neo4j_helpers import (
     clear_database,
-    get_neo4j_driver,
 )
 
 
@@ -36,10 +37,16 @@ def main() -> None:
     print("--- Neo4j Database Erasure Tool ---")
     
     # 1. Initialize Client and Check Connectivity
-    # We pass None to use the global settings (settings.py) which load from .env
-    # This avoids issues with Dagster's EnvVar not being resolved in this standalone script.
+    uri = os.environ.get("NEO4J_URI")
+    username = os.environ.get("NEO4J_USERNAME")
+    password = os.environ.get("NEO4J_PASSWORD")
+
+    if not all([uri, username, password]):
+        print("Error: Missing Neo4j environment variables (NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD).")
+        sys.exit(1)
+
     try:
-        driver = get_neo4j_driver(None)
+        driver = GraphDatabase.driver(uri, auth=(username, password))
         # Check connectivity
         driver.verify_connectivity()
         
@@ -50,7 +57,7 @@ def main() -> None:
         print(f"Details: {e}")
         sys.exit(1)
 
-    print(f"Connected to Neo4j.")
+    print(f"Connected to Neo4j at {db_uri}.")
     
     # 2. Confirmation Prompt
     confirm = input(

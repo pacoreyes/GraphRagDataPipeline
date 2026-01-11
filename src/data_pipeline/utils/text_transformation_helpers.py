@@ -127,6 +127,30 @@ def extract_unique_ids_from_column(df: pl.DataFrame, col_name: str) -> list[str]
     return []
 
 
+def extract_unique_ids_from_lazy_column(lf: pl.LazyFrame, col_name: str) -> pl.LazyFrame:
+    """
+    Extracts unique IDs from a column in a LazyFrame.
+    Handles List columns by exploding.
+    Returns a LazyFrame with a single column.
+    """
+    schema = lf.collect_schema()
+    if col_name not in schema.names():
+        return pl.LazyFrame(schema={col_name: pl.String})
+
+    dtype = schema[col_name]
+    
+    # Select and explode if list
+    expr = pl.col(col_name)
+    if isinstance(dtype, pl.List):
+        expr = expr.explode()
+    
+    return (
+        lf.select(expr)
+        .drop_nulls()
+        .unique()
+    )
+
+
 def deduplicate_by_priority(
     df: pl.DataFrame | pl.LazyFrame,
     sort_col: str,

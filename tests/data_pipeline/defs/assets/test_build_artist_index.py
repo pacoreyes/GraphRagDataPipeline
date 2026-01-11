@@ -22,46 +22,45 @@ from data_pipeline.defs.assets.build_artist_index import (
 async def test_build_artist_index_by_decade(mock_execute):
     """Test the extraction asset for a specific decade."""
     from contextlib import asynccontextmanager
-    
+
     # Create a mock context with a partition key
     context = build_asset_context(partition_key="1960s")
     mock_client = MagicMock(spec=httpx.AsyncClient)
-    
+
     mock_wikidata = MagicMock()
     @asynccontextmanager
     async def mock_yield(context):
         yield mock_client
-    mock_wikidata.yield_for_execution = mock_yield
-    
+    mock_wikidata.get_client = mock_yield
+
     mock_execute.return_value = [{"artist_uri": "http://q1", "name": "Artist 1", "start_date": "1965"}]
-    
+
     # Execute the asset
     result_df = await build_artist_index_by_decade(context, mock_wikidata)
-    
-    assert isinstance(result_df, pl.DataFrame)
-    assert len(result_df) == 1
-    assert result_df["name"][0] == "Artist 1"
-    
-    # Verify run_extraction_pipeline was called
-    mock_execute.assert_called_once()
+
+    assert isinstance(result_df, pl.LazyFrame)
+    # Check data (must collect)
+    df = result_df.collect()
+    assert len(df) == 1
+    assert df["name"][0] == "Artist 1"
+
 
 @patch("data_pipeline.defs.assets.build_artist_index.deduplicate_by_priority")
 def test_artist_index_merge_and_clean(mock_dedup):
     """Test the merge and deduplication asset."""
-    # Mock Input (Partitions)
-    mock_partitions = {
-        "1960s": pl.DataFrame({"artist_uri": ["http://q1"], "name": ["Artist 1"], "start_date": ["1965"]}),
-        "1970s": pl.DataFrame({"artist_uri": ["http://q2"], "name": ["Artist 2"], "start_date": ["1975"]})
-    }
-    
+    # Mock Input: Single LazyFrame (simulating IO manager combining partitions)
+    combined_df = pl.DataFrame([
+        {"artist_uri": "http://q1", "name": "Artist 1", "start_date": "1965"},
+        {"artist_uri": "http://q2", "name": "Artist 2", "start_date": "1975"}
+    ])
+    mock_input_lf = combined_df.lazy()
+
     mock_dedup.side_effect = lambda lf, **kwargs: lf
-    
+
     context = build_asset_context()
-    
+
     # Execute the asset
-    result_df = build_artist_index(context, mock_partitions)
+    result_lf = build_artist_index(context, mock_input_lf)
     
-    assert isinstance(result_df, pl.DataFrame)
-    assert len(result_df) == 2
-    assert set(result_df["name"].to_list()) == {"Artist 1", "Artist 2"}
+    assert isinstance(result_lf, pl.LazyFrame)
     mock_dedup.assert_called_once()

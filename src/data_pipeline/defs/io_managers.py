@@ -7,7 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-import os
 from pathlib import Path
 from typing import Union, Optional
 
@@ -41,10 +40,13 @@ class PolarsJSONLIOManager(ConfigurableIOManager):
         
         return Path(self.base_dir) / f"{asset_name}.jsonl"
 
-    def handle_output(self, context: OutputContext, obj: pl.DataFrame):
-        """Saves a Polars DataFrame to a JSONL file, omitting null values."""
+    def handle_output(self, context: OutputContext, obj: Union[pl.DataFrame, pl.LazyFrame]):
+        """Saves a Polars DataFrame or LazyFrame to a JSONL file, omitting null values."""
+        if isinstance(obj, pl.LazyFrame):
+            obj = obj.collect()
+        
         if not isinstance(obj, pl.DataFrame):
-            raise TypeError(f"Expected pl.DataFrame, got {type(obj)}")
+            raise TypeError(f"Expected pl.DataFrame or pl.LazyFrame, got {type(obj)}")
 
         path = self._get_path(context)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,7 +57,7 @@ class PolarsJSONLIOManager(ConfigurableIOManager):
         
         with open(path, "wb") as f:
             for d in dicts:
-                # Remove keys with None values only. Keep empty lists.
+                # Remove keys with None values only.
                 cleaned_d = {k: v for k, v in d.items() if v is not None}
                 
                 if cleaned_d:
@@ -65,23 +67,30 @@ class PolarsJSONLIOManager(ConfigurableIOManager):
         context.add_output_metadata({
             "row_count": len(obj),
             "path": str(path),
-            "file_size_kb": os.path.getsize(path) / 1024,
+            "file_size_kb": path.stat().st_size / 1024,
             "sparse_json": True
         })
 
-    def load_input(self, context: InputContext) -> Union[pl.DataFrame, dict[str, pl.DataFrame]]:
-        """Loads Polars DataFrame(s). Returns a single DataFrame or a dict for Fan-In."""
+    def load_input(self, context: InputContext) -> Union[pl.LazyFrame, dict[str, pl.LazyFrame]]:
+        """Loads Polars DataFrame(s) lazily. Returns a single LazyFrame or a dict for Fan-In."""
         if context.has_asset_partitions:
             if not context.has_partition_key:
                 partition_keys = context.asset_partition_keys
+                paths = []
                 results = {}
                 for pk in partition_keys:
                     path = self._get_path(context, partition_key=pk)
-                    results[pk] = pl.read_ndjson(str(path)) if path.exists() else pl.DataFrame()
-                return results
+                    if path.exists():
+                        paths.append(str(path))
+                        results[pk] = pl.scan_ndjson(str(path))
+                
+                # Return a single combined LazyFrame for Fan-In
+                if paths:
+                    return pl.scan_ndjson(paths)
+                return pl.LazyFrame()
             
         path = self._get_path(context)
         if not path.exists():
-            return pl.DataFrame()
+            return pl.LazyFrame()
 
-        return pl.read_ndjson(str(path))
+        return pl.scan_ndjson(str(path))

@@ -48,6 +48,49 @@ def get_genre_parents_batch_query(genre_qids: list[str]) -> str:
     """
 
 
+import uuid
+from collections import defaultdict
+from typing import Any
+
+import httpx
+import msgspec
+import polars as pl
+from dagster import asset, AssetExecutionContext
+
+from data_pipeline.models import Genre
+from data_pipeline.settings import settings
+from data_pipeline.utils.io_helpers import async_append_jsonl
+from data_pipeline.utils.text_transformation_helpers import extract_unique_ids_from_lazy_column, normalize_and_clean_text
+from data_pipeline.utils.wikidata_helpers import (
+    async_fetch_wikidata_entities_batch,
+    extract_wikidata_aliases,
+    extract_wikidata_label,
+    fetch_sparql_query_async,
+    get_sparql_binding_value,
+)
+from data_pipeline.defs.resources import WikidataResource
+
+
+def get_genre_parents_batch_query(genre_qids: list[str]) -> str:
+    """
+    Builds a SPARQL query to fetch the parent genres (subclass of P279) 
+    for a list of genre QIDs.
+
+    Args:
+        genre_qids: List of Genre Wikidata QIDs.
+
+    Returns:
+        A SPARQL query string.
+    """
+    values = " ".join([f"wd:{qid}" for qid in genre_qids])
+    return f"""
+    SELECT DISTINCT ?genre ?parent WHERE {{
+      VALUES ?genre {{ {values} }}
+      ?genre wdt:P279 ?parent.
+    }}
+    """
+
+
 @asset(
     name="genres",
     description="Extract Genres dataset from artists, albums and tracks",
@@ -55,42 +98,64 @@ def get_genre_parents_batch_query(genre_qids: list[str]) -> str:
 async def extract_genres(
     context: AssetExecutionContext, 
     wikidata: WikidataResource,
-    artists: pl.DataFrame,
-    albums: pl.DataFrame,
-    tracks: pl.DataFrame
-) -> pl.DataFrame:
+    artists: pl.LazyFrame,
+    albums: pl.LazyFrame,
+    tracks: pl.LazyFrame
+) -> pl.LazyFrame:
     """
     Extracts all unique music genre IDs from artists, albums, and tracks,
     fetches their English labels, aliases, and parents from Wikidata.
-    Returns a Polars DataFrame.
+    Returns a Polars LazyFrame backed by a temporary JSONL file.
     """
     context.log.info("Starting genre extraction from artists, albums, and tracks.")
 
-    # 1. Read input DataFrames and extract unique genre IDs
-    genre_ids = set()
-    
-    for df in [artists, albums, tracks]:
-        genre_ids.update(extract_unique_ids_from_column(df, "genres"))
+    # Temp file
+    temp_file = settings.DATASETS_DIRPATH / ".temp" / f"genres_{uuid.uuid4()}.jsonl"
+    temp_file.parent.mkdir(parents=True, exist_ok=True)
 
-    unique_genre_ids = sorted(list(genre_ids))
+    # 1. Lazy ID Extraction
+    lfs = []
+    for lf in [artists, albums, tracks]:
+        lfs.append(extract_unique_ids_from_lazy_column(lf, "genres"))
+    
+    combined_lf = pl.concat(lfs).unique().drop_nulls()
+    
+    # Materialize ONLY the IDs (typically small < 10k)
+    # We must collect here to drive the API queries
+    unique_genre_ids = combined_lf.collect().to_series().to_list()
+    
     context.log.info(f"Found {len(unique_genre_ids)} unique genre IDs.")
 
     if not unique_genre_ids:
-        context.log.warning("No genre IDs found. Returning empty DataFrame.")
-        return pl.DataFrame()
+        context.log.warning("No genre IDs found. Returning empty LazyFrame.")
+        return pl.LazyFrame()
 
-    # 2. Define combined worker function
-    async def process_batch_combined(
+    # 2. Worker function
+    async def process_batch(
         id_chunk: list[str], client: httpx.AsyncClient
-    ) -> list[Genre]:
+    ) -> list[dict[str, Any]]:
         # A. Fetch Metadata
         entity_data_map = await async_fetch_wikidata_entities_batch(
-            context, id_chunk, client=client
+            context, 
+            id_chunk, 
+            api_url=settings.WIKIDATA_ACTION_API_URL,
+            cache_dir=settings.WIKIDATA_CACHE_DIRPATH,
+            timeout=settings.WIKIDATA_ACTION_REQUEST_TIMEOUT,
+            rate_limit_delay=settings.WIKIDATA_ACTION_RATE_LIMIT_DELAY,
+            headers=settings.DEFAULT_REQUEST_HEADERS,
+            client=client
         )
         
         # B. Fetch Parents
         query = get_genre_parents_batch_query(id_chunk)
-        sparql_results = await fetch_sparql_query_async(context, query, client=client)
+        sparql_results = await fetch_sparql_query_async(
+            context, 
+            query, 
+            sparql_endpoint=settings.WIKIDATA_SPARQL_ENDPOINT,
+            headers=settings.DEFAULT_REQUEST_HEADERS,
+            timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
+            client=client
+        )
         
         parents_map = defaultdict(list)
         for row in sparql_results:
@@ -115,29 +180,31 @@ async def extract_genres(
             aliases = [normalize_and_clean_text(a) for a in extract_wikidata_aliases(genre_entity)]
             parent_ids = parents_map.get(genre_id, [])
             
-            batch_results.append(Genre(
-                id=genre_id, 
-                name=label, 
-                aliases=aliases if aliases else None,
-                parent_ids=parent_ids if parent_ids else None,
-            ))
+            batch_results.append(
+                msgspec.to_builtins(
+                    Genre(
+                        id=genre_id, 
+                        name=label, 
+                        aliases=aliases if aliases else None,
+                        parent_ids=parent_ids if parent_ids else None,
+                    )
+                )
+            )
 
         return batch_results
 
     # 3. Stream processing
-    async with wikidata.yield_for_execution(context) as client:
-        genre_stream = yield_batches_concurrently(
-            items=unique_genre_ids,
-            batch_size=settings.WIKIDATA_ACTION_BATCH_SIZE,
-            processor_fn=process_batch_combined,
-            concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
-            description="Fetching genre metadata and parents",
-            client=client,
-        )
+    batch_size = settings.WIKIDATA_ACTION_BATCH_SIZE
+    total_genres = len(unique_genre_ids)
+    
+    async with wikidata.get_client(context) as client:
+        # We can iterate the list directly since we materialized IDs
+        for i in range(0, total_genres, batch_size):
+            chunk = unique_genre_ids[i : i + batch_size]
+            context.log.info(f"Processing genre batch {i}/{total_genres}")
+            
+            batch_data = await process_batch(chunk, client)
+            await async_append_jsonl(temp_file, batch_data)
         
-        # 4. Collect results
-        context.log.info("Collecting genres.")
-        genres_list = [msgspec.to_builtins(g) async for g in genre_stream]
-
-    context.log.info(f"Successfully fetched {len(genres_list)} genres.")
-    return pl.DataFrame(genres_list)
+    context.log.info(f"Successfully fetched genres to {temp_file}.")
+    return pl.scan_ndjson(str(temp_file))

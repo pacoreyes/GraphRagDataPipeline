@@ -7,19 +7,18 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
+from typing import Any, Optional
+
 from dagster import (
     asset, 
     AssetExecutionContext, 
     AssetIn, 
     AllPartitionMapping
 )
-from typing import Any, Optional
 import polars as pl
 
-from data_pipeline.utils.wikidata_helpers import (
-    run_extraction_pipeline,
-    get_sparql_binding_value
-)
+from data_pipeline.settings import settings
+from data_pipeline.utils.wikidata_helpers import run_extraction_pipeline, get_sparql_binding_value
 from data_pipeline.utils.text_transformation_helpers import deduplicate_by_priority, normalize_and_clean_text
 from data_pipeline.defs.partitions import decade_partitions, DECADES_TO_EXTRACT
 from data_pipeline.defs.resources import WikidataResource
@@ -128,27 +127,31 @@ def _format_artist_record_from_sparql(
 async def build_artist_index_by_decade(
     context: AssetExecutionContext,
     wikidata: WikidataResource
-) -> pl.DataFrame:
+) -> pl.LazyFrame:
     """
     Extracts artist data for a specific decade (partition).
-    Returns a Polars DataFrame.
+    Returns a Polars LazyFrame.
     """
     decade = context.partition_key
     start_year, end_year = DECADES_TO_EXTRACT[decade]
 
-    async with wikidata.yield_for_execution(context) as client:
+    async with wikidata.get_client(context) as client:
         records = await run_extraction_pipeline(
             context=context,
             get_query_function=get_artists_by_year_range_query,
             record_processor=_format_artist_record_from_sparql,
             label=f"artists_{decade}",
+            sparql_endpoint=settings.WIKIDATA_SPARQL_ENDPOINT,
+            batch_size=settings.WIKIDATA_SPARQL_BATCH_SIZE,
+            concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
+            timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
             client=client,
             start_year=start_year,
             end_year=end_year,
         )
 
     context.log.info(f"Finished extraction for {decade}. Fetched {len(records)} records.")
-    return pl.DataFrame(records)
+    return pl.DataFrame(records).lazy()
 
 
 @asset(
@@ -160,39 +163,20 @@ async def build_artist_index_by_decade(
 )
 def build_artist_index(
     context: AssetExecutionContext,
-    build_artist_index_by_decade: dict[str, pl.DataFrame]
-) -> pl.DataFrame:
+    build_artist_index_by_decade: pl.LazyFrame
+) -> pl.LazyFrame:
     """
     Merges all decade-specific artist DataFrames into a single one,
     then performs deduplication and cleaning using Polars.
     """
-    # 1. Merge partitions
-    context.log.info("Merging partitioned artist DataFrames.")
-    dfs = list(build_artist_index_by_decade.values())
-    
-    if not dfs:
-        context.log.warning("No data found in partitions. Returning empty DataFrame.")
-        return pl.DataFrame()
-
-    df = pl.concat(dfs)
-    context.log.info(f"Merged raw artist index has {len(df)} records.")
-
-    # 2. Deduplicate & Clean
     context.log.info("Preprocessing artist index.")
-
-    lf = df.lazy()
 
     # Deduplicate by priority (URI and Name)
     clean_lf = deduplicate_by_priority(
-        lf,
+        build_artist_index_by_decade,
         sort_col="start_date",
         unique_cols=["artist_uri", "name"],
         descending=False
     )
 
-    # Collect
-    final_df = clean_lf.collect()
-    record_count = len(final_df)
-    
-    context.log.info(f"Deduplicated and finalized artist index ({record_count} records).")
-    return final_df
+    return clean_lf

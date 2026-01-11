@@ -8,9 +8,10 @@
 # -----------------------------------------------------------
 
 import pytest
+import httpx
 from unittest.mock import MagicMock, patch, AsyncMock
 from pathlib import Path
-from data_pipeline.utils.wikipedia_helpers import async_fetch_wikipedia_article, WIKIPEDIA_CACHE_DIR
+from data_pipeline.utils.wikipedia_helpers import async_fetch_wikipedia_article
 from data_pipeline.utils.text_transformation_helpers import clean_wikipedia_text
 
 @pytest.mark.asyncio
@@ -18,27 +19,26 @@ async def test_async_fetch_wikipedia_article_cache_hit():
     context = MagicMock()
     title = "Test_Article"
     qid = "Q123"
+    api_url = "http://test.api"
+    cache_dir = Path("/tmp/cache")
     cached_content = "This is cached content."
     
-    with patch("pathlib.Path.exists", new_callable=MagicMock) as mock_exists, \
-         patch("builtins.open", new_callable=MagicMock) as mock_open:
-        
+    with patch("data_pipeline.utils.wikipedia_helpers.async_read_text_file", new_callable=AsyncMock) as mock_read:
         # Simulate cache hit
-        mock_exists.return_value = True
-        mock_file = MagicMock()
-        mock_open.return_value.__enter__.return_value = mock_file
-        mock_file.read.return_value = cached_content
+        mock_read.return_value = cached_content
         
-        result = await async_fetch_wikipedia_article(context, title, qid=qid)
+        result = await async_fetch_wikipedia_article(context, title, qid=qid, api_url=api_url, cache_dir=cache_dir)
         
         assert result == cached_content
-        mock_open.assert_called_with(WIKIPEDIA_CACHE_DIR / "Q123.txt", "r", encoding="utf-8")
+        mock_read.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_async_fetch_wikipedia_article_cache_miss_fetch_success():
     context = MagicMock()
     title = "Test_Article"
     qid = "Q123"
+    api_url = "http://test.api"
+    cache_dir = Path("/tmp/cache")
     fetched_content = "This is fetched content."
     api_response = {
         "query": {
@@ -50,31 +50,34 @@ async def test_async_fetch_wikipedia_article_cache_miss_fetch_success():
         }
     }
     
-    with patch("pathlib.Path.exists", return_value=False), \
-         patch("builtins.open", new_callable=MagicMock) as mock_open, \
-         patch("data_pipeline.utils.wikipedia_helpers.make_async_request_with_retries", new_callable=AsyncMock) as mock_request, \
-         patch("pathlib.Path.mkdir") as mock_mkdir:
+    with patch("data_pipeline.utils.wikipedia_helpers.async_read_text_file", return_value=None), \
+         patch("data_pipeline.utils.wikipedia_helpers.async_write_text_file", new_callable=AsyncMock) as mock_write, \
+         patch("data_pipeline.utils.wikipedia_helpers.make_async_request_with_retries", new_callable=AsyncMock) as mock_request:
         
         mock_response = MagicMock()
         mock_response.json.return_value = api_response
         mock_request.return_value = mock_response
         
-        result = await async_fetch_wikipedia_article(context, title, qid=qid)
+        result = await async_fetch_wikipedia_article(context, title, qid=qid, api_url=api_url, cache_dir=cache_dir)
         
         assert result == fetched_content
         # Verify write to cache
-        mock_open.assert_called_with(WIKIPEDIA_CACHE_DIR / "Q123.txt", "w", encoding="utf-8")
-        mock_open.return_value.__enter__.return_value.write.assert_called_with(fetched_content)
+        mock_write.assert_called_once()
+        args, _ = mock_write.call_args
+        assert args[1] == fetched_content
 
 @pytest.mark.asyncio
 async def test_async_fetch_wikipedia_article_api_failure():
     context = MagicMock()
     title = "Test_Article"
+    qid = "Q123"
+    api_url = "http://test.api"
+    cache_dir = Path("/tmp/cache")
     
-    with patch("pathlib.Path.exists", return_value=False), \
-         patch("data_pipeline.utils.wikipedia_helpers.make_async_request_with_retries", side_effect=Exception("API Error")):
+    with patch("data_pipeline.utils.wikipedia_helpers.async_read_text_file", return_value=None), \
+         patch("data_pipeline.utils.wikipedia_helpers.make_async_request_with_retries", side_effect=httpx.HTTPError("API Error")):
         
-        result = await async_fetch_wikipedia_article(context, title)
+        result = await async_fetch_wikipedia_article(context, title, qid=qid, api_url=api_url, cache_dir=cache_dir)
         
         assert result is None
 

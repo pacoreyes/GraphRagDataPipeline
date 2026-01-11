@@ -9,14 +9,41 @@
 
 import polars as pl
 from dagster import AssetExecutionContext, MaterializeResult, asset
+from neo4j import Driver
 
 from data_pipeline.settings import settings
-from data_pipeline.utils.graph_db_helpers import (
+from data_pipeline.utils.neo4j_helpers import (
     clear_database,
-    create_indexes,
     execute_cypher,
 )
 from data_pipeline.defs.resources import Neo4jResource
+
+
+def _create_indexes(driver: Driver, context: AssetExecutionContext) -> None:
+    """
+    Creates necessary indexes in Neo4j to optimize query performance.
+    """
+    context.log.info("Creating indexes...")
+    
+    # noinspection SqlNoDataSourceInspection
+    index_commands = [
+        "CREATE INDEX artist_id_idx IF NOT EXISTS FOR (n:Artist) ON (n.id)",
+        "CREATE INDEX artist_name_idx IF NOT EXISTS FOR (n:Artist) ON (n.name)",
+        "CREATE INDEX album_id_idx IF NOT EXISTS FOR (n:Album) ON (n.id)",
+        "CREATE INDEX album_artist_id_idx IF NOT EXISTS FOR (n:Album) ON (n.artist_id)",
+        "CREATE INDEX track_id_idx IF NOT EXISTS FOR (n:Track) ON (n.id)",
+        "CREATE INDEX track_album_id_idx IF NOT EXISTS FOR (n:Track) ON (n.album_id)",
+        "CREATE INDEX genre_id_idx IF NOT EXISTS FOR (n:Genre) ON (n.id)",
+        "CREATE INDEX genre_name_idx IF NOT EXISTS FOR (n:Genre) ON (n.name)",
+    ]
+
+    for cmd in index_commands:
+        try:
+            execute_cypher(driver, cmd)
+            context.log.info(f"Executed: {cmd}")
+        except Exception as e:
+            context.log.error(f"Failed to execute '{cmd}': {e}")
+            raise e
 
 
 @asset(
@@ -26,17 +53,24 @@ from data_pipeline.defs.resources import Neo4jResource
 def ingest_graph_db(
     context: AssetExecutionContext, 
     neo4j: Neo4jResource,
-    artists: pl.DataFrame,
-    albums: pl.DataFrame,
-    tracks: pl.DataFrame,
-    genres: pl.DataFrame
+    artists: pl.LazyFrame,
+    albums: pl.LazyFrame,
+    tracks: pl.LazyFrame,
+    genres: pl.LazyFrame
 ) -> MaterializeResult:
     """
     Dagster asset that ingests music data into the Neo4j database.
     """
+    # Materialize LazyFrames to DataFrames for iteration
+    # We must collect because we need to iterate in batches for Neo4j
+    artists_df = artists.collect()
+    albums_df = albums.collect()
+    tracks_df = tracks.collect()
+    genres_df = genres.collect()
+
     batch_size = settings.GRAPH_DB_INGESTION_BATCH_SIZE
 
-    with neo4j.yield_for_execution(context) as driver:
+    with neo4j.get_driver(context) as driver:
         # --- Step 1: Clear Database & Prepare ---
         clear_database(driver, context)
 
@@ -55,8 +89,8 @@ def ingest_graph_db(
             parent_ids: row.parent_ids
         });
         """
-        if not genres.is_empty():
-            for batch_df in genres.iter_slices(n_rows=batch_size):
+        if not genres_df.is_empty():
+            for batch_df in genres_df.iter_slices(n_rows=batch_size):
                 batch_data = batch_df.to_dicts()
                 execute_cypher(driver, genre_query, {"batch": batch_data})
                 genre_count += len(batch_data)
@@ -77,8 +111,8 @@ def ingest_graph_db(
             similar_artists: row.similar_artists
         });
         """
-        if not artists.is_empty():
-            for batch_df in artists.iter_slices(n_rows=batch_size):
+        if not artists_df.is_empty():
+            for batch_df in artists_df.iter_slices(n_rows=batch_size):
                 batch_data = batch_df.to_dicts()
                 execute_cypher(driver, artist_query, {"batch": batch_data})
                 artist_count += len(batch_data)
@@ -97,8 +131,8 @@ def ingest_graph_db(
             genres: row.genres
         });
         """
-        if not albums.is_empty():
-            for batch_df in albums.iter_slices(n_rows=batch_size):
+        if not albums_df.is_empty():
+            for batch_df in albums_df.iter_slices(n_rows=batch_size):
                 batch_data = batch_df.to_dicts()
                 execute_cypher(driver, album_query, {"batch": batch_data})
                 album_count += len(batch_data)
@@ -116,15 +150,15 @@ def ingest_graph_db(
             genres: row.genres
         });
         """
-        if not tracks.is_empty():
-            for batch_df in tracks.iter_slices(n_rows=batch_size):
+        if not tracks_df.is_empty():
+            for batch_df in tracks_df.iter_slices(n_rows=batch_size):
                 batch_data = batch_df.to_dicts()
                 execute_cypher(driver, track_query, {"batch": batch_data})
                 track_count += len(batch_data)
         context.log.info(f"Loaded {track_count} tracks.")
 
         # --- Step 3: Index Creation ---
-        create_indexes(driver, context)
+        _create_indexes(driver, context)
 
         # --- Step 4: Relationship Ingestion ---
         context.log.info("Starting Stage 3: Relationship Ingestion")
@@ -206,10 +240,10 @@ def ingest_graph_db(
     return MaterializeResult(
         metadata={
             "total_records_input": {
-                "genres": len(genres),
-                "artists": len(artists),
-                "albums": len(albums),
-                "tracks": len(tracks)
+                "genres": len(genres_df),
+                "artists": len(artists_df),
+                "albums": len(albums_df),
+                "tracks": len(tracks_df)
             },
             "nodes_ingested": {
                 "genres": genre_count,
