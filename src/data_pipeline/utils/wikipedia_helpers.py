@@ -29,6 +29,7 @@ async def async_fetch_wikipedia_article(
     cache_dir: Path,
     headers: Optional[dict[str, str]] = None,
     client: Optional[AsyncClient] = None,
+    rate_limit_delay: float = 0.0,
 ) -> Optional[str]:
     """
     Fetches the raw plain text of a Wikipedia article by its title, with caching.
@@ -62,6 +63,7 @@ async def async_fetch_wikipedia_article(
             params=params,
             headers=headers,
             client=client,
+            rate_limit_delay=rate_limit_delay,
         )
         
         data = response.json()

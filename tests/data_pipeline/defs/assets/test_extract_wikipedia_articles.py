@@ -66,10 +66,18 @@ async def test_extract_wikipedia_articles_flow():
         mock_wikidata.get_client = mock_yield
 
         # Run Asset
-        result_df = await extract_wikipedia_articles(context, mock_wikidata, artists_df, genres_df, index_df)
+        result_lf = await extract_wikipedia_articles(
+            context, 
+            mock_wikidata, 
+            artists_df.lazy(), 
+            genres_df.lazy(), 
+            index_df.lazy()
+        )
 
         # Verifications
-        assert isinstance(result_df, pl.DataFrame)
+        assert isinstance(result_lf, pl.LazyFrame)
+        
+        result_df = result_lf.collect()
         assert len(result_df) == 2
         
         # Verify Fetch called for valid artist only
