@@ -7,47 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from collections import defaultdict
-
-import httpx
-import msgspec
-import polars as pl
-from dagster import asset, AssetExecutionContext
-
-from data_pipeline.models import Genre
-from data_pipeline.settings import settings
-from data_pipeline.utils.network_helpers import yield_batches_concurrently
-from data_pipeline.utils.text_transformation_helpers import extract_unique_ids_from_column, normalize_and_clean_text
-from data_pipeline.utils.wikidata_helpers import (
-    async_fetch_wikidata_entities_batch,
-    extract_wikidata_aliases,
-    extract_wikidata_label,
-    fetch_sparql_query_async,
-    get_sparql_binding_value,
-)
-from data_pipeline.defs.resources import WikidataResource
-
-
-def get_genre_parents_batch_query(genre_qids: list[str]) -> str:
-    """
-    Builds a SPARQL query to fetch the parent genres (subclass of P279) 
-    for a list of genre QIDs.
-
-    Args:
-        genre_qids: List of Genre Wikidata QIDs.
-
-    Returns:
-        A SPARQL query string.
-    """
-    values = " ".join([f"wd:{qid}" for qid in genre_qids])
-    return f"""
-    SELECT DISTINCT ?genre ?parent WHERE {{
-      VALUES ?genre {{ {values} }}
-      ?genre wdt:P279 ?parent.
-    }}
-    """
-
-
 import uuid
 from collections import defaultdict
 from typing import Any
@@ -60,7 +19,10 @@ from dagster import asset, AssetExecutionContext
 from data_pipeline.models import Genre
 from data_pipeline.settings import settings
 from data_pipeline.utils.io_helpers import async_append_jsonl
-from data_pipeline.utils.text_transformation_helpers import extract_unique_ids_from_lazy_column, normalize_and_clean_text
+from data_pipeline.utils.text_transformation_helpers import (
+    extract_unique_ids_from_lazy_column,
+    normalize_and_clean_text
+)
 from data_pipeline.utils.wikidata_helpers import (
     async_fetch_wikidata_entities_batch,
     extract_wikidata_aliases,
@@ -200,7 +162,7 @@ async def extract_genres(
     async with wikidata.get_client(context) as client:
         # We can iterate the list directly since we materialized IDs
         for i in range(0, total_genres, batch_size):
-            chunk = unique_genre_ids[i : i + batch_size]
+            chunk = unique_genre_ids[i: i + batch_size]
             context.log.info(f"Processing genre batch {i}/{total_genres}")
             
             batch_data = await process_batch(chunk, client)

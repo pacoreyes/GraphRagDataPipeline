@@ -220,9 +220,9 @@ async def extract_wikipedia_articles(
         async for article in article_stream:
             buffer.append(msgspec.to_builtins(article))
             if len(buffer) >= 50:
-                 await async_append_jsonl(temp_file, buffer)
-                 chunk_count += len(buffer)
-                 buffer = []
+                await async_append_jsonl(temp_file, buffer)
+                chunk_count += len(buffer)
+                buffer = []
         
         if buffer:
             await async_append_jsonl(temp_file, buffer)

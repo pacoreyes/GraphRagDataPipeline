@@ -20,6 +20,7 @@ dependencies = [
     "nomic",  # Embedding model (Nomic AI)
     "neo4j",  # Neo4j graph database driver
     "dagster_gcp",  # Dagster integration with GCP
+    "musicbrainzngs"  # MusicBrainz API client
 ]
 
 [dependency-groups]

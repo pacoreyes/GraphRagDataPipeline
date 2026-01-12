@@ -18,6 +18,7 @@ class Artist(msgspec.Struct, kw_only=True, omit_defaults=True):
     """
     id: str
     name: str
+    mbid: Optional[str] = None
     aliases: Optional[list[str]] = None
     country: Optional[str] = None
     genres: Optional[list[str]] = None  # List of QIDs

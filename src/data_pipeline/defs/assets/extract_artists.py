@@ -7,43 +7,10 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from typing import Any, Optional
-
-import httpx
-import msgspec
-import polars as pl
-from dagster import asset, AssetExecutionContext
-
-from data_pipeline.models import Artist
-from data_pipeline.settings import settings
-from data_pipeline.utils.network_helpers import (
-    run_tasks_concurrently,
-    yield_batches_concurrently,
-    deduplicate_stream,
-)
-from data_pipeline.utils.wikidata_helpers import (
-    async_fetch_wikidata_entities_batch,
-    async_resolve_qids_to_labels,
-    extract_wikidata_aliases,
-    extract_wikidata_claim_value,
-    extract_wikidata_claim_ids,
-    extract_wikidata_wikipedia_url,
-)
-from data_pipeline.utils.lastfm_helpers import async_fetch_lastfm_data_with_cache
-from data_pipeline.utils.text_transformation_helpers import normalize_and_clean_text
-from data_pipeline.defs.resources import WikidataResource, LastFmResource
-
-# --- Music Domain Constants ---
-WIKIDATA_PROP_COUNTRY = ["P495", "P27"]
-WIKIDATA_PROP_GENRE = ["P136", "P101"]
-WIKIDATA_PROP_MBID = "P434"
-
-
 import uuid
 from typing import Any, Optional
 
 import httpx
-import msgspec
 import polars as pl
 from dagster import asset, AssetExecutionContext
 
@@ -228,9 +195,13 @@ async def _enrich_artist_batch(
 
         tags = []
         similar_artists = []
+        lastfm_mbid = None
+
         if lastfm_data and "artist" in lastfm_data:
             # Domain-specific parsing of Last.fm response
             artist_data = lastfm_data.get("artist") or {}
+
+            lastfm_mbid = artist_data.get("mbid")
             
             # Tags
             raw_tags = (artist_data.get("tags") or {}).get("tag") or []
@@ -247,6 +218,7 @@ async def _enrich_artist_batch(
         return Artist(
             id=qid,
             name=name,
+            mbid=lastfm_mbid,
             aliases=aliases if aliases else None,
             country=country_label if country_label else None,
             genres=meta.get("genre_qids") if meta.get("genre_qids") else None,

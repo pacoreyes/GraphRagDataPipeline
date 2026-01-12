@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     WIKIPEDIA_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
     WIKIDATA_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
     LAST_FM_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
+    MUSICBRAINZ_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
     DATASETS_DIRPATH: Path | None = Field(default=None, init=False)
 
     # ==============================================================================
@@ -61,7 +62,10 @@ class Settings(BaseSettings):
     LASTFM_API_URL: str = "https://ws.audioscrobbler.com/2.0/"
 
     # Bot's public identity (Polite for APIs)
-    USER_AGENT: str = "Nodes AI (info@nodesAI.de)"
+    APP_NAME: str = "Nodes AI"
+    APP_VERSION: str = "0.1.0"
+    CONTACT_EMAIL: str = "info@nodesAI.de"
+    USER_AGENT: str | None = Field(default=None, init=False)
     DEFAULT_REQUEST_HEADERS: dict[str, str] | None = Field(default=None, init=False)
 
     # ==============================================================================
@@ -76,18 +80,23 @@ class Settings(BaseSettings):
     WIKIDATA_SPARQL_REQUEST_TIMEOUT: int = 60
 
     # WIKIDATA ACTION API
-    WIKIDATA_ACTION_BATCH_SIZE: int = 50
+    WIKIDATA_ACTION_BATCH_SIZE: int = 30
     WIKIDATA_ACTION_REQUEST_TIMEOUT: int = 30
     WIKIDATA_ACTION_RATE_LIMIT_DELAY: int = 0
 
     # WIKIPEDIA API
-    WIKIPEDIA_CONCURRENT_REQUESTS: int = 1
-    WIKIPEDIA_RATE_LIMIT_DELAY: int = 1
+    WIKIPEDIA_CONCURRENT_REQUESTS: int = 5
+    WIKIPEDIA_RATE_LIMIT_DELAY: float = 0.2
 
     # LASTFM API
     LASTFM_CONCURRENT_REQUESTS: int = 5
     LASTFM_REQUEST_TIMEOUT: int = 30
     LASTFM_RATE_LIMIT_DELAY: int = 1
+
+    # MUSICBRAINZ API
+    MUSICBRAINZ_CONCURRENT_REQUESTS: int = 1
+    MUSICBRAINZ_RATE_LIMIT_DELAY: float = 1.0
+    MUSICBRAINZ_REQUEST_TIMEOUT: int = 60
 
     # ==============================================================================
     # NEO4J CONFIGURATION
@@ -103,6 +112,7 @@ class Settings(BaseSettings):
         self.WIKIPEDIA_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "wikipedia"
         self.WIKIDATA_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "wikidata"
         self.LAST_FM_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "last_fm"
+        self.MUSICBRAINZ_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "musicbrainz"
         self.DATASETS_DIRPATH = self.DATA_DIR / "datasets"
 
         # Create directories if they don't exist
@@ -110,11 +120,13 @@ class Settings(BaseSettings):
             self.WIKIPEDIA_CACHE_DIRPATH,
             self.WIKIDATA_CACHE_DIRPATH,
             self.LAST_FM_CACHE_DIRPATH,
+            self.MUSICBRAINZ_CACHE_DIRPATH,
             self.DATASETS_DIRPATH,
         ]
         for directory in dirs_to_create:
             directory.mkdir(parents=True, exist_ok=True)
 
+        self.USER_AGENT = f"{self.APP_NAME}/{self.APP_VERSION} ({self.CONTACT_EMAIL})"
         self.DEFAULT_REQUEST_HEADERS = {
             "User-Agent": self.USER_AGENT,
             "Accept": "application/json",

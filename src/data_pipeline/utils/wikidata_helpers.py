@@ -128,7 +128,14 @@ def get_sparql_binding_value(data: dict[str, Any], key: str) -> Any:
     return (data.get(key) or {}).get("value")
 
 
+
 # --- Entity Fetching Helpers ---
+
+FALLBACK_LANGUAGES = [
+    "en", "de", "es", "fr", "it", "ja", "pt", "ru", "zh", 
+    "nl", "sv", "no", "da", "fi", "ko", "pl", "uk", "tr", 
+    "ro", "he"
+]
 
 
 async def async_fetch_wikidata_entities_batch(
@@ -184,7 +191,7 @@ async def async_fetch_wikidata_entities_batch(
             "ids": "|".join(chunk),
             "format": "json",
             "props": "claims|labels|aliases|descriptions|sitelinks",
-            "languages": "en",
+            "languages": "|".join(FALLBACK_LANGUAGES),
         }
         
         try:
@@ -256,14 +263,41 @@ async def async_resolve_qids_to_labels(
 
 
 def extract_wikidata_label(entity_data: dict[str, Any], lang: str = "en") -> Optional[str]:
-    """Extracts the label for a given language."""
-    return ((entity_data.get("labels") or {}).get(lang) or {}).get("value")
+    """
+    Extracts the label for a given language.
+    If the requested language is not found, tries FALLBACK_LANGUAGES.
+    """
+    labels = entity_data.get("labels") or {}
+    
+    # 1. Try requested language
+    if lang in labels:
+        return labels[lang].get("value")
+        
+    # 2. Try fallback languages
+    for fallback in FALLBACK_LANGUAGES:
+        if fallback in labels:
+            return labels[fallback].get("value")
+            
+    return None
 
 
 def extract_wikidata_aliases(entity_data: dict[str, Any], lang: str = "en") -> list[str]:
-    """Extracts aliases for a given language."""
-    aliases = (entity_data.get("aliases") or {}).get(lang) or []
-    return [a["value"] for a in aliases]
+    """
+    Extracts aliases for a given language.
+    If the requested language has no aliases, tries FALLBACK_LANGUAGES.
+    """
+    all_aliases = entity_data.get("aliases") or {}
+    
+    # 1. Try requested language
+    if lang in all_aliases:
+        return [a["value"] for a in all_aliases[lang]]
+        
+    # 2. Try fallback languages
+    for fallback in FALLBACK_LANGUAGES:
+        if fallback in all_aliases:
+            return [a["value"] for a in all_aliases[fallback]]
+            
+    return []
 
 
 def extract_wikidata_wikipedia_url(entity_data: dict[str, Any], lang: str = "en") -> Optional[str]:

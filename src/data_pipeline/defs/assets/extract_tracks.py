@@ -7,57 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from typing import Any
-
-import httpx
-import msgspec
-import polars as pl
-from dagster import asset, AssetExecutionContext
-
-from data_pipeline.models import Track
-from data_pipeline.settings import settings
-from data_pipeline.utils.network_helpers import (
-    yield_batches_concurrently,
-    deduplicate_stream,
-)
-from data_pipeline.utils.wikidata_helpers import (
-    fetch_sparql_query_async,
-    get_sparql_binding_value,
-)
-from data_pipeline.utils.text_transformation_helpers import normalize_and_clean_text
-from data_pipeline.defs.resources import WikidataResource
-
-
-def get_tracks_by_albums_batch_query(album_qids: list[str]) -> str:
-    """
-    Builds a SPARQL query to fetch tracks for multiple albums in one request.
-    Uses bidirectional logic: Album->Track (P658) OR Track->Album (P361).
-    Implements explicit label fallback (English -> Any).
-
-    Args:
-        album_qids: List of Album Wikidata QIDs.
-
-    Returns:
-        A SPARQL query string.
-    """
-    values = " ".join([f"wd:{qid}" for qid in album_qids])
-    return f"""
-    SELECT DISTINCT ?album ?track ?trackLabel ?genre WHERE {{
-      VALUES ?album {{ {values} }}
-      {{ ?album wdt:P658 ?track. }}  # Forward: Album has tracklist containing track
-      UNION
-      {{ ?track wdt:P361 ?album. }}  # Reverse: Track is part of album
-      
-      OPTIONAL {{ ?track wdt:P136 ?genre. }}
-
-      # Label Fallback: English -> Any
-      OPTIONAL {{ ?track rdfs:label ?enLabel . FILTER(LANG(?enLabel) = "en") }}
-      OPTIONAL {{ ?track rdfs:label ?anyLabel . }}
-      BIND(COALESCE(?enLabel, ?anyLabel) AS ?trackLabel)
-    }}
-    """
-
-
 import uuid
 from typing import Any
 
