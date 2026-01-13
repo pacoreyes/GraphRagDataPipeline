@@ -13,15 +13,15 @@ from dagster import (
     load_asset_checks_from_modules
 )
 
-from data_pipeline.defs import assets, resources, checks
+from data_pipeline.defs import assets, resources, data_quality_checkers
 
 # 1. Load Assets
 # This scans the 'data_pipeline.defs.assets' package for @asset decorated functions
 all_assets = load_assets_from_package_module(assets)
 
 # 2. Load Asset Checks
-# This scans the 'checks' module
-all_checks = load_asset_checks_from_modules([checks])
+# This scans the 'data_quality_checkers' module
+all_checks = load_asset_checks_from_modules([data_quality_checkers])
 
 # 3. Construct Definitions
 # Merging everything explicitly

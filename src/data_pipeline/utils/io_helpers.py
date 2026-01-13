@@ -8,6 +8,7 @@
 # -----------------------------------------------------------
 
 import asyncio
+import hashlib
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,7 +17,7 @@ import msgspec
 JSONDecodeError = msgspec.DecodeError
 
 
-async def async_read_json_file(path: Path) -> Optional[dict[str, Any]]:
+async def async_read_json_file(path: Path) -> Optional[Any]:
     """
     Reads and decodes a JSON file asynchronously using msgspec.
     """
@@ -87,18 +88,16 @@ async def async_clear_file(path: Path) -> None:
         await asyncio.to_thread(path.unlink)
 
 
+def generate_cache_key(text: str) -> str:
+    """Creates a SHA256 hash of a string to use as a cache key."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def decode_json(data: bytes) -> Any:
     """
     Decodes JSON bytes using msgspec.
     """
     return msgspec.json.decode(data)
-
-
-def encode_json(data: Any) -> bytes:
-    """
-    Encodes data to JSON bytes using msgspec.
-    """
-    return msgspec.json.encode(data)
 
 
 async def async_append_jsonl(path: Path, items: list[Any]) -> None:

@@ -10,7 +10,7 @@
 from contextlib import contextmanager, asynccontextmanager
 from typing import Any, AsyncGenerator, Generator
 
-import httpx
+from curl_cffi.requests import AsyncSession as AsyncClient
 from dagster import (
     ConfigurableResource,
     Definitions,
@@ -27,6 +27,42 @@ class LastFmResource(ConfigurableResource):
     Configuration for Last.fm API.
     """
     api_key: str
+
+    @asynccontextmanager
+    async def get_client(self, context) -> AsyncGenerator[AsyncClient, None]:
+        context.log.debug(f"Initializing Last.fm client (Run ID: {context.run_id})")
+        async with AsyncClient(
+            headers={
+                "Accept": "application/json",
+                "X-Dagster-Run-Id": context.run_id
+            },
+            timeout=settings.LASTFM_REQUEST_TIMEOUT,
+            impersonate="chrome"
+        ) as client:
+            yield client
+
+
+class MusicBrainzResource(ConfigurableResource):
+    """
+    Configuration for MusicBrainz API.
+    """
+    api_url: str
+    request_timeout: int
+    rate_limit_delay: float
+
+    @asynccontextmanager
+    async def get_client(self, context) -> AsyncGenerator[AsyncClient, None]:
+        context.log.debug(f"Initializing MusicBrainz client (Run ID: {context.run_id})")
+        async with AsyncClient(
+            headers={
+                "User-Agent": settings.USER_AGENT, 
+                "Accept": "application/json",
+                "X-Dagster-Run-Id": context.run_id
+            },
+            timeout=self.request_timeout,
+            impersonate="chrome"
+        ) as client:
+            yield client
 
 
 class NomicResource(ConfigurableResource):
@@ -46,6 +82,7 @@ class Neo4jResource(ConfigurableResource):
 
     @contextmanager
     def get_driver(self, context) -> Generator[Driver, None, None]:
+        context.log.debug(f"Initializing Neo4j driver (Run ID: {context.run_id})")
         driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password))
         try:
             yield driver
@@ -59,12 +96,42 @@ class WikidataResource(ConfigurableResource):
     """
     user_agent: str
     timeout: int
+    impersonate: str = "chrome"
 
     @asynccontextmanager
-    async def get_client(self, context) -> AsyncGenerator[httpx.AsyncClient, None]:
-        async with httpx.AsyncClient(
-            headers={"User-Agent": self.user_agent},
-            timeout=self.timeout
+    async def get_client(self, context) -> AsyncGenerator[AsyncClient, None]:
+        context.log.debug(f"Initializing Wikidata client (Run ID: {context.run_id})")
+        async with AsyncClient(
+            headers={
+                "User-Agent": self.user_agent, 
+                "Accept": "application/json",
+                "X-Dagster-Run-Id": context.run_id
+            },
+            timeout=self.timeout,
+            impersonate=self.impersonate
+        ) as client:
+            yield client
+
+
+class WikipediaResource(ConfigurableResource):
+    """
+    Resource for making HTTP requests to Wikipedia API.
+    """
+    api_url: str
+    timeout: int
+    rate_limit_delay: float
+
+    @asynccontextmanager
+    async def get_client(self, context) -> AsyncGenerator[AsyncClient, None]:
+        context.log.debug(f"Initializing Wikipedia client (Run ID: {context.run_id})")
+        async with AsyncClient(
+            headers={
+                "User-Agent": settings.USER_AGENT, 
+                "Accept": "application/json",
+                "X-Dagster-Run-Id": context.run_id
+            },
+            timeout=self.timeout,
+            impersonate="chrome"
         ) as client:
             yield client
 
@@ -73,6 +140,11 @@ class WikidataResource(ConfigurableResource):
 resource_defs: dict[str, Any] = {
     "lastfm": LastFmResource(
         api_key=EnvVar("LASTFM_API_KEY")
+    ),
+    "musicbrainz": MusicBrainzResource(
+        api_url=settings.MUSICBRAINZ_API_URL,
+        request_timeout=settings.MUSICBRAINZ_REQUEST_TIMEOUT,
+        rate_limit_delay=settings.MUSICBRAINZ_RATE_LIMIT_DELAY,
     ),
     "nomic": NomicResource(
         api_key=EnvVar("NOMIC_API_KEY")
@@ -84,7 +156,13 @@ resource_defs: dict[str, Any] = {
     ),
     "wikidata": WikidataResource(
         user_agent=settings.USER_AGENT,
-        timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT
+        timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
+        impersonate="chrome"
+    ),
+    "wikipedia": WikipediaResource(
+        api_url=settings.WIKIPEDIA_API_URL,
+        timeout=settings.WIKIPEDIA_REQUEST_TIMEOUT,
+        rate_limit_delay=settings.WIKIPEDIA_RATE_LIMIT_DELAY,
     ),
     "io_manager": PolarsJSONLIOManager(base_dir=str(settings.DATASETS_DIRPATH))
 }

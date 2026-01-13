@@ -28,5 +28,6 @@ data_volume/
 # Dagster
 .tmp_*
 
-# Gemini
+# AI Coding assistants
 .gemini/
+.claude/

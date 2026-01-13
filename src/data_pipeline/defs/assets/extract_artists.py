@@ -7,17 +7,19 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
+import asyncio
 import re
+import shutil
 from typing import Any, Optional
 
-import httpx
 import polars as pl
-from dagster import asset, AssetExecutionContext
+from dagster import asset, AssetExecutionContext, MaterializeResult
 
 from data_pipeline.models import Artist
 from data_pipeline.settings import settings
 from data_pipeline.utils.network_helpers import (
     run_tasks_concurrently,
+    AsyncClient,
 )
 from data_pipeline.utils.io_helpers import async_append_jsonl, async_clear_file
 from data_pipeline.utils.wikidata_helpers import (
@@ -29,7 +31,7 @@ from data_pipeline.utils.wikidata_helpers import (
     extract_wikidata_wikipedia_url,
 )
 from data_pipeline.utils.lastfm_helpers import async_fetch_lastfm_data_with_cache
-from data_pipeline.utils.text_transformation_helpers import normalize_and_clean_text
+from data_pipeline.utils.data_transformation_helpers import normalize_and_clean_text
 from data_pipeline.defs.resources import WikidataResource, LastFmResource
 
 # --- Music Domain Constants ---
@@ -46,7 +48,7 @@ WIKIDATA_PROP_MBID = "P434"
 LATIN_REGEX = re.compile(r"^[\u0000-\u007F\u0080-\u00FF\u0100-\u017F\u0180-\u024F\u1E00-\u1EFF]*$")
 
 
-def _is_latin_name(name: str) -> bool:
+def _is_latin_name(name: Optional[str]) -> bool:
     """
     Checks if the name consists only of Latin characters, numbers, and common symbols.
     """
@@ -85,7 +87,7 @@ async def _enrich_artist_batch(
     artist_batch: list[dict[str, Any]],
     context: AssetExecutionContext,
     lastfm: LastFmResource,
-    client: httpx.AsyncClient,
+    client: AsyncClient,
 ) -> list[Artist]:
     """
     Enriches a batch of artists with Wikidata and Last.fm data.
@@ -105,6 +107,7 @@ async def _enrich_artist_batch(
         clean_qids,
         api_url=settings.WIKIDATA_ACTION_API_URL,
         cache_dir=settings.WIKIDATA_CACHE_DIRPATH,
+        languages=settings.WIKIDATA_FALLBACK_LANGUAGES,
         timeout=settings.WIKIDATA_ACTION_REQUEST_TIMEOUT,
         rate_limit_delay=settings.WIKIDATA_ACTION_RATE_LIMIT_DELAY,
         headers=settings.DEFAULT_REQUEST_HEADERS,
@@ -145,6 +148,7 @@ async def _enrich_artist_batch(
         list(qids_to_resolve),
         api_url=settings.WIKIDATA_ACTION_API_URL,
         cache_dir=settings.WIKIDATA_CACHE_DIRPATH,
+        languages=settings.WIKIDATA_FALLBACK_LANGUAGES,
         timeout=settings.WIKIDATA_ACTION_REQUEST_TIMEOUT,
         rate_limit_delay=settings.WIKIDATA_ACTION_RATE_LIMIT_DELAY,
         headers=settings.DEFAULT_REQUEST_HEADERS,
@@ -168,8 +172,10 @@ async def _enrich_artist_batch(
 
         # Resolve Country Label
         country_label = labels_map.get(meta.get("country_qid"))
-        if country_label:
-            country_label = normalize_and_clean_text(country_label)
+        if not country_label:
+            return None
+            
+        country_label = normalize_and_clean_text(country_label)
 
         # Centralized Validation
         mbid = _validate_artist_data(wikidata_info, country_label)
@@ -177,7 +183,12 @@ async def _enrich_artist_batch(
             return None
 
         # Aliases
-        aliases = [normalize_and_clean_text(a) for a in extract_wikidata_aliases(wikidata_info)]
+        aliases = [
+            normalize_and_clean_text(a) 
+            for a in extract_wikidata_aliases(
+                wikidata_info, languages=settings.WIKIDATA_FALLBACK_LANGUAGES
+            )
+        ]
 
         # Last.fm Strategy (Business Logic)
         lastfm_data = await async_fetch_lastfm_data_with_cache(
@@ -219,7 +230,7 @@ async def _enrich_artist_batch(
             name=name,
             mbid=mbid,
             aliases=aliases if aliases else None,
-            country=country_label if country_label else None,
+            country=country_label,
             genres=meta.get("genre_qids") if meta.get("genre_qids") else None,
             tags=tags if tags else None,
             similar_artists=similar_artists if similar_artists else None,
@@ -248,16 +259,17 @@ async def extract_artists(
     wikidata: WikidataResource,
     lastfm: LastFmResource,
     artist_index: pl.LazyFrame
-) -> pl.LazyFrame:
+) -> MaterializeResult:
     """
     Enriches all artists from the merged index.
-    Returns a Polars LazyFrame backed by a temporary JSONL file.
+    Returns a MaterializeResult with metadata, having moved the file to the final destination.
     """
     context.log.info("Starting artist enrichment for full index.")
 
     # Temp file for streaming results
-    temp_file = settings.DATASETS_DIRPATH / ".temp" / "artists.jsonl"
-    temp_file.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = settings.TEMP_DIRPATH / "artists.jsonl"
+    final_file = settings.DATASETS_DIRPATH / "artists.jsonl"
+
     await async_clear_file(temp_file)
 
     # 1. Get Total Count for Loop
@@ -266,7 +278,13 @@ async def extract_artists(
     context.log.info(f"Total artists to process: {total_rows}")
 
     if total_rows == 0:
-        return pl.LazyFrame()
+        return MaterializeResult(
+            metadata={
+                "row_count": 0,
+                "path": str(final_file),
+                "sparse_json": True
+            }
+        )
 
     batch_size = settings.WIKIDATA_ACTION_BATCH_SIZE
 
@@ -308,8 +326,20 @@ async def extract_artists(
             # Write Batch to Disk (Stream)
             await async_append_jsonl(temp_file, enriched_batch)
 
-    context.log.info(f"Enriched artists saved to {temp_file}")
+    context.log.info(f"Enriched artists saved to {temp_file}. Moving to {final_file}...")
 
-    # Return LazyFrame pointing to the streamed file
-    # Ensure we use scan_ndjson as we wrote JSONL
-    return pl.scan_ndjson(str(temp_file))
+    # 4. Move to Final Destination
+    if await asyncio.to_thread(temp_file.exists):
+        await asyncio.to_thread(shutil.move, str(temp_file), str(final_file))
+        
+    row_count = 0
+    if await asyncio.to_thread(final_file.exists):
+        row_count = pl.scan_ndjson(str(final_file)).select(pl.len()).collect().item()
+
+    return MaterializeResult(
+        metadata={
+            "row_count": row_count,
+            "path": str(final_file),
+            "sparse_json": True
+        }
+    )

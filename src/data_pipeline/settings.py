@@ -31,11 +31,12 @@ class Settings(BaseSettings):
     DATA_DIR: Path = PROJECT_DIR / "data_volume"
 
     # Define fields for directories
-    WIKIPEDIA_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
-    WIKIDATA_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
-    LAST_FM_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
-    MUSICBRAINZ_CACHE_DIRPATH: Path | None = Field(default=None, init=False)
-    DATASETS_DIRPATH: Path | None = Field(default=None, init=False)
+    WIKIPEDIA_CACHE_DIRPATH: Path = Field(default_factory=lambda: Path("."), init=False)
+    WIKIDATA_CACHE_DIRPATH: Path = Field(default_factory=lambda: Path("."), init=False)
+    LAST_FM_CACHE_DIRPATH: Path = Field(default_factory=lambda: Path("."), init=False)
+    MUSICBRAINZ_CACHE_DIRPATH: Path = Field(default_factory=lambda: Path("."), init=False)
+    DATASETS_DIRPATH: Path = Field(default_factory=lambda: Path("."), init=False)
+    TEMP_DIRPATH: Path = Field(default_factory=lambda: Path("."), init=False)
 
     # ==============================================================================
     #  VECTOR DATABASE SETTINGS
@@ -65,22 +66,28 @@ class Settings(BaseSettings):
     MUSICBRAINZ_API_URL: str = "https://musicbrainz.org/ws/2"
 
     # Bot's public identity (Polite for APIs)
-    APP_NAME: str = "Nodes AI"
-    APP_VERSION: str = "0.1.0"
-    CONTACT_EMAIL: str = "info@nodesAI.de"
-    USER_AGENT: str | None = Field(default=None, init=False)
-    DEFAULT_REQUEST_HEADERS: dict[str, str] | None = Field(default=None, init=False)
+    APP_NAME: str = "Node AI"
+    APP_VERSION: str = "0.2.1"
+    CONTACT_EMAIL: str = "info@nodesai.de"
+    USER_AGENT: str = Field(default="", init=False)
+    DEFAULT_REQUEST_HEADERS: dict[str, str] = Field(default_factory=dict, init=False)
 
     # ==============================================================================
-    #  API PROCESSING PARAMETERS
-    # ==============================================================================
+    #  API & SERVICE CONFIGURATION
+
 
     # WIKIDATA API
     WIKIDATA_CONCURRENT_REQUESTS: int = 5
+    WIKIDATA_FALLBACK_LANGUAGES: list[str] = [
+        "en", "de", "es", "fr", "it", "ja", "pt", "ru", "zh",
+        "nl", "sv", "no", "da", "fi", "ko", "pl", "uk", "tr",
+        "ro", "he"
+    ]
 
     # WIKIDATA SPARQL ENDPOINT API
     WIKIDATA_SPARQL_BATCH_SIZE: int = 500
     WIKIDATA_SPARQL_REQUEST_TIMEOUT: int = 60
+    WIKIDATA_SPARQL_RATE_LIMIT_DELAY: float = 5.0
 
     # WIKIDATA ACTION API
     WIKIDATA_ACTION_BATCH_SIZE: int = 30
@@ -90,6 +97,7 @@ class Settings(BaseSettings):
     # WIKIPEDIA API
     WIKIPEDIA_CONCURRENT_REQUESTS: int = 5
     WIKIPEDIA_RATE_LIMIT_DELAY: float = 0.2
+    WIKIPEDIA_REQUEST_TIMEOUT: int = 60
 
     # LASTFM API
     LASTFM_CONCURRENT_REQUESTS: int = 5
@@ -107,6 +115,20 @@ class Settings(BaseSettings):
     GRAPH_DB_INGESTION_BATCH_SIZE: int = 1000
 
     # ==============================================================================
+    #  STREAMING BUFFER SIZES
+    # ==============================================================================
+    RELEASES_BUFFER_SIZE: int = 100
+    TRACKS_BUFFER_SIZE: int = 200
+    ARTICLES_BUFFER_SIZE: int = 50
+
+    # ==============================================================================
+    #  TEXT PROCESSING / RAG SETTINGS
+    # ==============================================================================
+    TEXT_CHUNK_SIZE: int = 2048
+    TEXT_CHUNK_OVERLAP: int = 512
+    MIN_CONTENT_LENGTH: int = 30
+
+    # ==============================================================================
     #  AUTO-CREATION DIRS
     # ==============================================================================
     @model_validator(mode='after')
@@ -117,6 +139,7 @@ class Settings(BaseSettings):
         self.LAST_FM_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "last_fm"
         self.MUSICBRAINZ_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "musicbrainz"
         self.DATASETS_DIRPATH = self.DATA_DIR / "datasets"
+        self.TEMP_DIRPATH = self.DATA_DIR / ".temp"
 
         # Create directories if they don't exist
         dirs_to_create = [
@@ -125,6 +148,7 @@ class Settings(BaseSettings):
             self.LAST_FM_CACHE_DIRPATH,
             self.MUSICBRAINZ_CACHE_DIRPATH,
             self.DATASETS_DIRPATH,
+            self.TEMP_DIRPATH,
         ]
         for directory in dirs_to_create:
             directory.mkdir(parents=True, exist_ok=True)

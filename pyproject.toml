@@ -8,8 +8,7 @@ dependencies = [
     "pydantic",  # Data validation
     "pydantic-settings",  # Configuration validation
     "structlog",  # Structured logging
-    "msgspec",  # High-performance serialization
-    "httpx",  # Async/Sync HTTP client
+    "msgspec",  # Async/Sync HTTP client
     "tqdm",  # Progress bars
     "ftfy", # Text cleaning
     "langchain-text-splitters",  # Text splitter used in embeddings
@@ -19,8 +18,9 @@ dependencies = [
     "einops",  # For tensor operations
     "nomic",  # Embedding model (Nomic AI)
     "neo4j",  # Neo4j graph database driver
-    "dagster_gcp",  # Dagster integration with GCP
-    "musicbrainzngs"  # MusicBrainz API client
+    "dagster_gcp",  # Dagster integration with GCP  # MusicBrainz API client
+    "musicbrainzngs",
+    "curl-cffi>=0.14.0",
 ]
 
 [dependency-groups]

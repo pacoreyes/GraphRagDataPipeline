@@ -100,57 +100,6 @@ def normalize_and_clean_text(text_or_expr: Union[str, pl.Expr]) -> Union[str, pl
         raise TypeError(f"Expected str or pl.Expr, got {type(text_or_expr)}")
 
 
-def extract_unique_ids_from_column(df: pl.DataFrame, col_name: str) -> list[str]:
-    """
-    Explodes a list column and extracts unique string values using Polars expressions.
-
-    Args:
-        df: The input Polars DataFrame.
-        col_name: The name of the column containing lists of IDs.
-
-    Returns:
-        A list of unique IDs.
-    """
-    if col_name not in df.columns:
-        return []
-
-    # Check if column is actually a list
-    dtype = df.schema[col_name]
-    if isinstance(dtype, pl.List):
-        return (
-            df.select(pl.col(col_name).explode())
-            .drop_nulls()
-            .unique()
-            .to_series()
-            .to_list()
-        )
-    return []
-
-
-def extract_unique_ids_from_lazy_column(lf: pl.LazyFrame, col_name: str) -> pl.LazyFrame:
-    """
-    Extracts unique IDs from a column in a LazyFrame.
-    Handles List columns by exploding.
-    Returns a LazyFrame with a single column.
-    """
-    schema = lf.collect_schema()
-    if col_name not in schema.names():
-        return pl.LazyFrame(schema={col_name: pl.String})
-
-    dtype = schema[col_name]
-    
-    # Select and explode if list
-    expr = pl.col(col_name)
-    if isinstance(dtype, pl.List):
-        expr = expr.explode()
-    
-    return (
-        lf.select(expr)
-        .drop_nulls()
-        .unique()
-    )
-
-
 def deduplicate_by_priority(
     df: pl.DataFrame | pl.LazyFrame,
     sort_col: str,

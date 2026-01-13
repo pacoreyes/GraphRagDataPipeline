@@ -8,14 +8,15 @@
 # -----------------------------------------------------------
 
 import pytest
-import httpx
+import shutil
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import polars as pl
-from dagster import build_asset_context
+from dagster import build_asset_context, MaterializeResult
 
 from data_pipeline.defs.assets.extract_artists import extract_artists, _is_latin_name
 from data_pipeline.defs.resources import LastFmResource
+from data_pipeline.utils.network_helpers import AsyncClient
 
 
 def test_is_latin_name():
@@ -45,7 +46,9 @@ def test_is_latin_name():
 @patch("data_pipeline.defs.assets.extract_artists.async_resolve_qids_to_labels")
 @patch("data_pipeline.defs.assets.extract_artists.async_fetch_wikidata_entities_batch")
 @patch("data_pipeline.defs.assets.extract_artists.settings")
+@patch("data_pipeline.defs.assets.extract_artists.shutil.move")
 async def test_extract_artist(
+    mock_move,
     mock_settings,
     mock_fetch_entities,
     mock_resolve_labels,
@@ -62,7 +65,15 @@ async def test_extract_artist(
     mock_settings.LASTFM_CONCURRENT_REQUESTS = 2
     mock_settings.LASTFM_API_URL = "http://mock.last.fm"
     mock_settings.WIKIDATA_CONCEPT_BASE_URI_PREFIX = "http://www.wikidata.org/entity/"
-    mock_settings.DATASETS_DIRPATH = Path("/tmp")
+    
+    # Mock Paths to control .exists() behavior
+    temp_path_mock = MagicMock()
+    final_path_mock = MagicMock()
+    temp_path_mock.exists.return_value = True
+    final_path_mock.exists.return_value = True
+    
+    mock_settings.TEMP_DIRPATH.__truediv__.return_value = temp_path_mock
+    mock_settings.DATASETS_DIRPATH.__truediv__.return_value = final_path_mock
 
     # Mock Input DataFrame (artist_index)
     # Added "Non-Latin Artist" (Cyrillic) which should be filtered
@@ -149,7 +160,7 @@ async def test_extract_artist(
     # Mock Context and Resource
     lastfm = LastFmResource(api_key="dummy_key")
     context = build_asset_context()
-    mock_client = MagicMock(spec=httpx.AsyncClient)
+    mock_client = MagicMock(spec=AsyncClient)
 
     mock_wikidata = MagicMock()
     @asynccontextmanager
@@ -158,12 +169,12 @@ async def test_extract_artist(
     mock_wikidata.get_client = mock_yield
 
     # Execution
-    result_df = await extract_artists(context, mock_wikidata, lastfm, mock_index_df)
+    result = await extract_artists(context, mock_wikidata, lastfm, mock_index_df)
 
-    assert isinstance(result_df, pl.LazyFrame)
+    assert isinstance(result, MaterializeResult)
     # Verify processing ran
     assert mock_append.called
-    assert mock_scan.called
+    assert mock_move.called
     
     # Verify that async_fetch_wikidata_entities_batch was called with correct QIDs
     # It should NOT contain Q5 (Битлз)

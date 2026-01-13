@@ -7,46 +7,26 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-from collections import defaultdict
+import asyncio
+import shutil
 from typing import Any
 
-import httpx
 import msgspec
 import polars as pl
-from dagster import asset, AssetExecutionContext
+from dagster import asset, AssetExecutionContext, MaterializeResult
 
 from data_pipeline.models import Genre
 from data_pipeline.settings import settings
+from data_pipeline.utils.network_helpers import AsyncClient
 from data_pipeline.utils.io_helpers import async_append_jsonl, async_clear_file
-from data_pipeline.utils.text_transformation_helpers import normalize_and_clean_text
+from data_pipeline.utils.data_transformation_helpers import normalize_and_clean_text
 from data_pipeline.utils.wikidata_helpers import (
     async_fetch_wikidata_entities_batch,
     extract_wikidata_aliases,
+    extract_wikidata_claim_ids,
     extract_wikidata_label,
-    fetch_sparql_query_async,
-    get_sparql_binding_value,
 )
 from data_pipeline.defs.resources import WikidataResource
-
-
-def get_genre_parents_batch_query(genre_qids: list[str]) -> str:
-    """
-    Builds a SPARQL query to fetch the parent genres (subclass of P279) 
-    for a list of genre QIDs.
-
-    Args:
-        genre_qids: List of Genre Wikidata QIDs.
-
-    Returns:
-        A SPARQL query string.
-    """
-    values = " ".join([f"wd:{qid}" for qid in genre_qids])
-    return f"""
-    SELECT DISTINCT ?genre ?parent WHERE {{
-      VALUES ?genre {{ {values} }}
-      ?genre wdt:P279 ?parent.
-    }}
-    """
 
 
 @asset(
@@ -57,17 +37,18 @@ async def extract_genres(
     context: AssetExecutionContext, 
     wikidata: WikidataResource,
     artists: pl.LazyFrame
-) -> pl.LazyFrame:
+) -> MaterializeResult:
     """
     Extracts all unique music genre IDs from the artists dataset,
     fetches their English labels, aliases, and parents from Wikidata.
-    Returns a Polars LazyFrame backed by a temporary JSONL file.
+    Returns a MaterializeResult with metadata, having moved the file to the final destination.
     """
     context.log.info("Starting genre extraction from artists.")
 
     # Temp file
-    temp_file = settings.DATASETS_DIRPATH / ".temp" / "genres.jsonl"
-    temp_file.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = settings.TEMP_DIRPATH / "genres.jsonl"
+    final_file = settings.DATASETS_DIRPATH / "genres.jsonl"
+    
     await async_clear_file(temp_file)
 
     # 1. Lazy ID Extraction
@@ -85,12 +66,18 @@ async def extract_genres(
     context.log.info(f"Found {len(unique_genre_ids)} unique genre IDs in artists.")
 
     if not unique_genre_ids:
-        context.log.warning("No genre IDs found. Returning empty LazyFrame.")
-        return pl.LazyFrame()
+        context.log.warning("No genre IDs found. Returning empty result.")
+        return MaterializeResult(
+            metadata={
+                "row_count": 0,
+                "path": str(final_file),
+                "sparse_json": True
+            }
+        )
 
     # 2. Worker function
     async def process_batch(
-        id_chunk: list[str], client: httpx.AsyncClient
+        id_chunk: list[str], client: AsyncClient
     ) -> list[dict[str, Any]]:
         # A. Fetch Metadata
         entity_data_map = await async_fetch_wikidata_entities_batch(
@@ -98,45 +85,34 @@ async def extract_genres(
             id_chunk, 
             api_url=settings.WIKIDATA_ACTION_API_URL,
             cache_dir=settings.WIKIDATA_CACHE_DIRPATH,
+            languages=settings.WIKIDATA_FALLBACK_LANGUAGES,
             timeout=settings.WIKIDATA_ACTION_REQUEST_TIMEOUT,
             rate_limit_delay=settings.WIKIDATA_ACTION_RATE_LIMIT_DELAY,
             headers=settings.DEFAULT_REQUEST_HEADERS,
             client=client
         )
         
-        # B. Fetch Parents
-        query = get_genre_parents_batch_query(id_chunk)
-        sparql_results = await fetch_sparql_query_async(
-            context, 
-            query, 
-            sparql_endpoint=settings.WIKIDATA_SPARQL_ENDPOINT,
-            headers=settings.DEFAULT_REQUEST_HEADERS,
-            timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
-            client=client
-        )
-        
-        parents_map = defaultdict(list)
-        for row in sparql_results:
-            genre_uri = get_sparql_binding_value(row, "genre")
-            parent_uri = get_sparql_binding_value(row, "parent")
-            if genre_uri and parent_uri:
-                gid = genre_uri.split("/")[-1]
-                pid = parent_uri.split("/")[-1]
-                parents_map[gid].append(pid)
-
         batch_results = []
         for genre_id in id_chunk:
             genre_entity = entity_data_map.get(genre_id)
             if not genre_entity:
                 continue
 
-            label = extract_wikidata_label(genre_entity)
+            label = extract_wikidata_label(
+                genre_entity, languages=settings.WIKIDATA_FALLBACK_LANGUAGES
+            )
             if not label:
                 continue
 
             label = normalize_and_clean_text(label)
-            aliases = [normalize_and_clean_text(a) for a in extract_wikidata_aliases(genre_entity)]
-            parent_ids = parents_map.get(genre_id, [])
+            aliases = [
+                normalize_and_clean_text(a) 
+                for a in extract_wikidata_aliases(
+                    genre_entity, languages=settings.WIKIDATA_FALLBACK_LANGUAGES
+                )
+            ]
+            # P279 is "subclass of", which represents the parent genre
+            parent_ids = extract_wikidata_claim_ids(genre_entity, "P279")
             
             batch_results.append(
                 msgspec.to_builtins(
@@ -164,5 +140,22 @@ async def extract_genres(
             batch_data = await process_batch(chunk, client)
             await async_append_jsonl(temp_file, batch_data)
         
-    context.log.info(f"Successfully fetched genres to {temp_file}.")
-    return pl.scan_ndjson(str(temp_file))
+    context.log.info(f"Successfully fetched genres to {temp_file}. Moving to {final_file}...")
+    
+    # 4. Move to Final Destination
+    if await asyncio.to_thread(temp_file.exists):
+        await asyncio.to_thread(shutil.move, str(temp_file), str(final_file))
+        
+    row_count = 0
+    if await asyncio.to_thread(final_file.exists):
+        # We can use polars simply to count lines efficiently or just trust the process
+        # Using scan_ndjson to get count is safe and O(1) memory
+        row_count = pl.scan_ndjson(str(final_file)).select(pl.len()).collect().item()
+
+    return MaterializeResult(
+        metadata={
+            "row_count": row_count,
+            "path": str(final_file),
+            "sparse_json": True
+        }
+    )

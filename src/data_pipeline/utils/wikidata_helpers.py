@@ -9,7 +9,7 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 from dagster import AssetExecutionContext
 
@@ -20,9 +20,9 @@ from data_pipeline.utils.network_helpers import (
     HTTPError,
 )
 from data_pipeline.utils.io_helpers import (
-    async_read_json_file, 
-    async_write_json_file, 
-    decode_json, 
+    async_read_json_file,
+    async_write_json_file,
+    decode_json,
     JSONDecodeError
 )
 
@@ -36,6 +36,7 @@ async def run_extraction_pipeline(
     batch_size: int,
     concurrency_limit: int,
     timeout: int = 60,
+    rate_limit_delay: float = 0.0,
     client: Optional[AsyncClient] = None,
     **query_params: Any,
 ) -> list[dict[str, Any]]:
@@ -58,11 +59,12 @@ async def run_extraction_pipeline(
             query = get_query_function(
                 **query_params, limit=batch_size, offset=offset
             )
-            return await fetch_sparql_query_async(
-                context, 
-                query, 
+            return await _fetch_sparql_query_async(
+                context,
+                query,
                 sparql_endpoint=sparql_endpoint,
                 timeout=timeout,
+                rate_limit_delay=rate_limit_delay,
                 client=client
             )
 
@@ -82,7 +84,7 @@ async def run_extraction_pipeline(
                 processed_record = record_processor(item)
                 if processed_record:
                     all_records.append(processed_record)
-        
+
         if batch_has_partial_page:
             has_more_data = False
         else:
@@ -92,12 +94,13 @@ async def run_extraction_pipeline(
     return all_records
 
 
-async def fetch_sparql_query_async(
+async def _fetch_sparql_query_async(
     context: AssetExecutionContext,
     query: str,
     sparql_endpoint: str,
     headers: Optional[dict[str, str]] = None,
     timeout: int = 60,
+    rate_limit_delay: float = 0.0,
     client: Optional[AsyncClient] = None,
 ) -> list[dict[str, Any]]:
     """
@@ -111,11 +114,18 @@ async def fetch_sparql_query_async(
             params={"query": query, "format": "json"},
             headers=headers,
             timeout=timeout,
+            rate_limit_delay=rate_limit_delay,
             client=client,
         )
-        data = decode_json(response.content)
+        data = decode_json(cast(Any, response.content))
         return (data.get("results") or {}).get("bindings") or []
     except HTTPError as e:
+        if e.response is not None and e.response.status_code in [403, 429]:
+            context.log.error(
+                f"Wikidata API blocked the request (Status {e.response.status_code}). "
+                "This usually indicates an IP ban or rate limit violation. "
+                "Check 'bot-traffic@wikimedia.org' messages in the response body."
+            )
         context.log.error(f"An unrecoverable error occurred during SPARQL query: {e}")
         raise
     except JSONDecodeError as e:
@@ -128,21 +138,14 @@ def get_sparql_binding_value(data: dict[str, Any], key: str) -> Any:
     return (data.get(key) or {}).get("value")
 
 
-
 # --- Entity Fetching Helpers ---
-
-FALLBACK_LANGUAGES = [
-    "en", "de", "es", "fr", "it", "ja", "pt", "ru", "zh", 
-    "nl", "sv", "no", "da", "fi", "ko", "pl", "uk", "tr", 
-    "ro", "he"
-]
-
 
 async def async_fetch_wikidata_entities_batch(
     context: AssetExecutionContext,
     qids: list[str],
     api_url: str,
     cache_dir: Path,
+    languages: Optional[list[str]] = None,
     timeout: int = 60,
     rate_limit_delay: float = 0.0,
     concurrency_limit: int = 5,
@@ -169,7 +172,7 @@ async def async_fetch_wikidata_entities_batch(
         return None
 
     cache_results = await asyncio.gather(*[check_cache(qid) for qid in qids])
-    
+
     for qid, cached_data in zip(qids, cache_results):
         if cached_data:
             combined_entities[qid] = cached_data
@@ -191,9 +194,9 @@ async def async_fetch_wikidata_entities_batch(
             "ids": "|".join(chunk),
             "format": "json",
             "props": "claims|labels|aliases|descriptions|sitelinks",
-            "languages": "|".join(FALLBACK_LANGUAGES),
+            "languages": "|".join(languages) if languages else "en",
         }
-        
+
         try:
             response = await make_async_request_with_retries(
                 context=context,
@@ -207,14 +210,14 @@ async def async_fetch_wikidata_entities_batch(
             )
             data = response.json()
             entities = data.get("entities", {})
-            
+
             for qid, entity_data in entities.items():
                 if "missing" in entity_data:
                     continue
-                
+
                 cache_file = cache_dir / f"{qid}.json"
                 await async_write_json_file(cache_file, entity_data)
-            
+
             return entities
         except Exception as e:
             context.log.warning(f"Failed to fetch Wikidata entities batch: {e}")
@@ -238,65 +241,77 @@ async def async_resolve_qids_to_labels(
     qids: list[str],
     api_url: str,
     cache_dir: Path,
+    languages: Optional[list[str]] = None,
     timeout: int = 60,
     rate_limit_delay: float = 0.0,
     headers: Optional[dict[str, str]] = None,
     client: Optional[AsyncClient] = None,
 ) -> dict[str, str]:
-    """Resolves a list of QIDs to their English labels."""
+    """Resolves a list of QIDs to their labels."""
     entities = await async_fetch_wikidata_entities_batch(
-        context, 
-        qids, 
-        api_url=api_url, 
-        cache_dir=cache_dir, 
-        timeout=timeout, 
+        context,
+        qids,
+        api_url=api_url,
+        cache_dir=cache_dir,
+        languages=languages,
+        timeout=timeout,
         rate_limit_delay=rate_limit_delay,
         headers=headers,
         client=client
     )
     labels = {}
     for qid, data in entities.items():
-        label = extract_wikidata_label(data)
+        label = extract_wikidata_label(data, languages=languages)
         if label:
             labels[qid] = label
     return labels
 
 
-def extract_wikidata_label(entity_data: dict[str, Any], lang: str = "en") -> Optional[str]:
+def extract_wikidata_label(
+    entity_data: dict[str, Any], 
+    lang: str = "en", 
+    languages: Optional[list[str]] = None
+) -> Optional[str]:
     """
     Extracts the label for a given language.
-    If the requested language is not found, tries FALLBACK_LANGUAGES.
+    If the requested language is not found, tries the provided languages list.
     """
     labels = entity_data.get("labels") or {}
-    
+
     # 1. Try requested language
     if lang in labels:
         return labels[lang].get("value")
-        
+
     # 2. Try fallback languages
-    for fallback in FALLBACK_LANGUAGES:
-        if fallback in labels:
-            return labels[fallback].get("value")
-            
+    if languages:
+        for fallback in languages:
+            if fallback in labels:
+                return labels[fallback].get("value")
+
     return None
 
 
-def extract_wikidata_aliases(entity_data: dict[str, Any], lang: str = "en") -> list[str]:
+def extract_wikidata_aliases(
+    entity_data: dict[str, Any], 
+    lang: str = "en",
+    languages: Optional[list[str]] = None
+) -> list[str]:
     """
     Extracts aliases for a given language.
-    If the requested language has no aliases, tries FALLBACK_LANGUAGES.
+    If the requested language has no aliases, tries the provided languages list.
     """
     all_aliases = entity_data.get("aliases") or {}
-    
+
     # 1. Try requested language
     if lang in all_aliases:
         return [a["value"] for a in all_aliases[lang]]
-        
+
     # 2. Try fallback languages
-    for fallback in FALLBACK_LANGUAGES:
-        if fallback in all_aliases:
-            return [a["value"] for a in all_aliases[fallback]]
-            
+    if languages:
+        for fallback in languages:
+            if fallback in all_aliases:
+                return [a["value"] for a in all_aliases[fallback]]
+
     return []
 
 
@@ -322,20 +337,20 @@ def extract_wikidata_claim_value(
     claims = entity_data.get("claims", {})
     if property_id not in claims:
         return None
-    
+
     claim = claims[property_id][0]
     mainsnak = claim.get("mainsnak", {})
-    
+
     if mainsnak.get("snaktype") != "value":
         return None
-        
+
     datavalue = mainsnak.get("datavalue", {})
     dtype = datavalue.get("type")
     value = datavalue.get("value")
 
     if dtype == "wikibase-entityid":
         return value.get("id")
-    
+
     return value
 
 
@@ -346,7 +361,7 @@ def extract_wikidata_claim_ids(
     claims = entity_data.get("claims", {})
     if property_id not in claims:
         return []
-    
+
     ids = []
     for claim in claims[property_id]:
         mainsnak = claim.get("mainsnak", {})

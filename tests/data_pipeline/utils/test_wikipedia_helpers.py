@@ -8,11 +8,11 @@
 # -----------------------------------------------------------
 
 import pytest
-import httpx
 from unittest.mock import MagicMock, patch, AsyncMock
 from pathlib import Path
 from data_pipeline.utils.wikipedia_helpers import async_fetch_wikipedia_article
-from data_pipeline.utils.text_transformation_helpers import clean_wikipedia_text
+from data_pipeline.utils.network_helpers import HTTPError
+from data_pipeline.utils.data_transformation_helpers import clean_wikipedia_text
 
 @pytest.mark.asyncio
 async def test_async_fetch_wikipedia_article_cache_hit():
@@ -75,7 +75,7 @@ async def test_async_fetch_wikipedia_article_api_failure():
     cache_dir = Path("/tmp/cache")
     
     with patch("data_pipeline.utils.wikipedia_helpers.async_read_text_file", return_value=None), \
-         patch("data_pipeline.utils.wikipedia_helpers.make_async_request_with_retries", side_effect=httpx.HTTPError("API Error")):
+         patch("data_pipeline.utils.wikipedia_helpers.make_async_request_with_retries", side_effect=HTTPError("API Error")):
         
         result = await async_fetch_wikipedia_article(context, title, qid=qid, api_url=api_url, cache_dir=cache_dir)
         

@@ -55,11 +55,10 @@ The project follows a layered architecture to separate business logic from orche
     *   **Role 2: Complexity Hiding:** Encapsulates messy details (SPARQL query construction, JSON parsing, Unicode fixing) to keep Asset files clean and readable.
     *   **Role 3: Testability:** Functions are designed to be "pure" or generic, making them easy to unit test in isolation.
     *   *Key Modules:*
-        *   `network_helpers.py`: Transport layer (retries, batching, rate limiting).
-        *   `*_helpers.py`: Service wrappers for Wikidata, Last.fm, etc.
-        *   `text_transformation_helpers.py`: Domain-agnostic text cleaning (ftfy, regex).
-        *   `graph_db_helpers.py`: Cypher query wrappers and index management.
-
+        *   `network_helpers.py`: HTTP request utilities with retries and concurrency control.
+        *   `io_helpers.py`: Caching, file I/O, and serialization (JSON/JSONL) with sparse output.
+        *   `data_transformation_helpers.py`: Domain-agnostic text cleaning and Polars DataFrame operations.
+        *   `wikidata_helpers.py`, `wikipedia_helpers.py`, `lastfm_helpers.py`, `musicbrainz_helpers.py`: API adapters.
 *   **`src/data_pipeline/defs/checks.py` (The Quality Gate)**:
     *   Defines **Automated Data Quality Checks**. Verifies the integrity of assets *after* they are materialized (e.g., "Are there >0 null IDs?", "Is the album count per artist reasonable?").
 

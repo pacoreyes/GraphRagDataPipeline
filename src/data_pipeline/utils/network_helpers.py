@@ -8,10 +8,11 @@
 # -----------------------------------------------------------
 
 import asyncio
-from typing import Any, Callable, Coroutine, Optional, TypeVar, AsyncIterable, Iterable, Union
+from typing import Any, Callable, Coroutine, Optional, TypeVar, AsyncIterable, cast
 
-from httpx import AsyncClient, HTTPError, Response
-
+from curl_cffi.requests import AsyncSession as AsyncClient
+from curl_cffi.requests import Response
+from curl_cffi.requests.errors import RequestsError as HTTPError
 from dagster import AssetExecutionContext
 from tqdm.asyncio import tqdm_asyncio
 from tqdm.asyncio import tqdm
@@ -31,6 +32,7 @@ async def make_async_request_with_retries(
     timeout: int = 60,
     rate_limit_delay: float = 0.0,
     client: Optional[AsyncClient] = None,
+    impersonate: Optional[str] = "chrome",
 ) -> Response:
     """
     Executes an asynchronous HTTP request with an exponential backoff retry strategy.
@@ -46,6 +48,7 @@ async def make_async_request_with_retries(
         timeout (int): Request timeout seconds.
         rate_limit_delay (float): Optional delay before the request for rate limiting.
         client (Optional[AsyncClient]): Optional existing client to reuse.
+        impersonate (Optional[str]): Browser fingerprint to impersonate (default: "chrome").
 
     Returns:
         Response: The successful response.
@@ -55,7 +58,7 @@ async def make_async_request_with_retries(
 
     should_close_client = False
     if client is None:
-        client = AsyncClient(timeout=timeout)
+        client = AsyncClient(timeout=timeout, impersonate=impersonate)
         should_close_client = True
 
     try:
@@ -69,7 +72,7 @@ async def make_async_request_with_retries(
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
 
-                response = await client.request(method, url, **request_args)
+                response = await client.request(cast(Any, method.upper()), url, **request_args)
                 response.raise_for_status()
                 return response
 
@@ -85,7 +88,7 @@ async def make_async_request_with_retries(
                 await asyncio.sleep(wait_time)
     finally:
         if should_close_client:
-            await client.aclose()
+            await client.close()
 
     raise HTTPError(
         f"Failed to fetch data using {method} for {url} after {max_retries} retries."
@@ -128,6 +131,7 @@ async def yield_batches_concurrently(
     description: str = "Processing Batches",
     timeout: int = 60,
     client: Optional[AsyncClient] = None,
+    impersonate: Optional[str] = "chrome",
 ) -> AsyncIterable[R]:
     """
     Processes a list of items in batches concurrently and yields results as they complete.
@@ -139,6 +143,7 @@ async def yield_batches_concurrently(
         description: Progress bar description.
         timeout: Timeout for the httpx client.
         client: Optional existing client to reuse.
+        impersonate: Browser fingerprint to impersonate (default: "chrome").
     Yields:
         Individual result items from the processed batches.
     """
@@ -146,7 +151,7 @@ async def yield_batches_concurrently(
     semaphore = asyncio.Semaphore(concurrency_limit)
     should_close_client = False
     if client is None:
-        client = AsyncClient(timeout=timeout)
+        client = AsyncClient(timeout=timeout, impersonate=impersonate)
         should_close_client = True
     try:
         async def worker(batch: list[T]) -> list[R]:
@@ -161,56 +166,4 @@ async def yield_batches_concurrently(
                 yield res
     finally:
         if should_close_client:
-            await client.aclose()
-
-
-async def deduplicate_stream(
-    items: Union[Iterable[T], AsyncIterable[T]],
-    key_attr: Union[str, list[str]] = "id"
-) -> AsyncIterable[T]:
-    """
-    Middleware generator that filters duplicates from a stream based on a unique key or composite keys.
-    
-    Args:
-        items: The input stream (async or sync).
-        key_attr: The attribute name(s) or dict key(s) to use for deduplication. 
-                  Can be a single string or a list of strings for composite keys.
-    
-    Yields:
-        Unique items.
-    """
-    seen_ids: set[Any] = set()
-    is_composite = isinstance(key_attr, list)
-    
-    # Helper to extract key value
-    def get_key_value(item: Any, attr: str) -> Any:
-        val = getattr(item, attr, None)
-        if val is None and isinstance(item, dict):
-            return item.get(attr)
-        return val
-
-    # Helper to extract the unique identifier (single or tuple)
-    def get_unique_id(item: Any) -> Any:
-        if is_composite:
-            # For composite keys, create a tuple of values
-            return tuple(get_key_value(item, k) for k in key_attr)
-        else:
-            return get_key_value(item, key_attr)  # type: ignore
-
-    if isinstance(items, AsyncIterable):
-        async for item in items:
-            unique_id = get_unique_id(item)
-            
-            # If a composite key has any None, we might still want to dedup it as (None, Val)
-            # But usually if the primary ID is missing we might skip. 
-            # Assuming robust data, we treat 'None' as a value to check against.
-            
-            if unique_id not in seen_ids:
-                seen_ids.add(unique_id)
-                yield item
-    else:
-        for item in items:
-            unique_id = get_unique_id(item)
-            if unique_id not in seen_ids:
-                seen_ids.add(unique_id)
-                yield item
+            await client.close()

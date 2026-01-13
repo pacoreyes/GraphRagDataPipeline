@@ -7,24 +7,28 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
+import asyncio
+import shutil
 from typing import Any, Optional
 
 from dagster import (
-    asset, 
-    AssetExecutionContext, 
-    AssetIn, 
-    AllPartitionMapping
+    asset,
+    AssetExecutionContext,
+    AssetIn,
+    AllPartitionMapping,
+    MaterializeResult
 )
 import polars as pl
 
 from data_pipeline.settings import settings
+from data_pipeline.utils.io_helpers import async_append_jsonl, async_clear_file
 from data_pipeline.utils.wikidata_helpers import run_extraction_pipeline, get_sparql_binding_value
-from data_pipeline.utils.text_transformation_helpers import deduplicate_by_priority, normalize_and_clean_text
+from data_pipeline.utils.data_transformation_helpers import deduplicate_by_priority, normalize_and_clean_text
 from data_pipeline.defs.partitions import decade_partitions, DECADES_TO_EXTRACT
 from data_pipeline.defs.resources import WikidataResource
 
 
-def get_artists_by_year_range_query(
+def _get_artists_by_year_range_query(
     start_year: int,
     end_year: int,
     limit: int,
@@ -48,7 +52,7 @@ WHERE {{
   # --- INNER QUERY: Find the artists first (Pagination happens here) ---
   {{
     SELECT DISTINCT ?artist ?start_date
-    
+
     # 1. Genre: Electronic & Subgenres, 'Genre' (P136) AND 'Field of Work' (P101)
     WHERE {{
       # 1. Genre: Electronic & Subgenres
@@ -60,16 +64,16 @@ WHERE {{
 
       # 3. Date Filter
       ?artist wdt:P571|wdt:P2031 ?start_date .
-      FILTER (YEAR(?start_date) >= {start_year} && YEAR(?start_date) <= {end_year})
+      FILTER (YEAR(?start_date) >= {{start_year}} && YEAR(?start_date) <= {{end_year}})
     }}
     # Pagination applies only to the ID retrieval (Fast)
     ORDER BY ?start_date ?artist
-    LIMIT {limit}
-    OFFSET {offset}
+    LIMIT {{limit}}
+    OFFSET {{offset}}
   }}
 
   # --- OUTER QUERY: Fetch Labels for the 100 results ---
-  
+
   # A. Try to find an English label specifically
   OPTIONAL {{ ?artist rdfs:label ?enLabel . FILTER(LANG(?enLabel) = "en") }}
 
@@ -138,13 +142,14 @@ async def build_artist_index_by_decade(
     async with wikidata.get_client(context) as client:
         records = await run_extraction_pipeline(
             context=context,
-            get_query_function=get_artists_by_year_range_query,
+            get_query_function=_get_artists_by_year_range_query,
             record_processor=_format_artist_record_from_sparql,
             label=f"artists_{decade}",
             sparql_endpoint=settings.WIKIDATA_SPARQL_ENDPOINT,
             batch_size=settings.WIKIDATA_SPARQL_BATCH_SIZE,
             concurrency_limit=settings.WIKIDATA_CONCURRENT_REQUESTS,
             timeout=settings.WIKIDATA_SPARQL_REQUEST_TIMEOUT,
+            rate_limit_delay=settings.WIKIDATA_SPARQL_RATE_LIMIT_DELAY,
             client=client,
             start_year=start_year,
             end_year=end_year,
@@ -161,15 +166,21 @@ async def build_artist_index_by_decade(
         "build_artist_index_by_decade": AssetIn(partition_mapping=AllPartitionMapping())
     }
 )
-def build_artist_index(
+async def build_artist_index(
     context: AssetExecutionContext,
     build_artist_index_by_decade: pl.LazyFrame
-) -> pl.LazyFrame:
+) -> MaterializeResult:
     """
     Merges all decade-specific artist DataFrames into a single one,
-    then performs deduplication and cleaning using Polars.
+    deduplicates the result, and writes to a JSONL file.
     """
     context.log.info("Preprocessing artist index.")
+
+    # Temp file
+    temp_file = settings.TEMP_DIRPATH / "artist_index.jsonl"
+    final_file = settings.DATASETS_DIRPATH / "artist_index.jsonl"
+    
+    await async_clear_file(temp_file)
 
     # Deduplicate by priority (URI and Name)
     clean_lf = deduplicate_by_priority(
@@ -178,5 +189,37 @@ def build_artist_index(
         unique_cols=["artist_uri", "name"],
         descending=False
     )
+    
+    # Materialize to stream write
+    # We collect here because we assume the index fits in memory for deduplication sorting.
+    clean_df = clean_lf.collect()
+    total_rows = len(clean_df)
+    
+    context.log.info(f"Writing {total_rows} deduplicated artists to temp file.")
+    
+    # Write in chunks to keep sparse JSON logic efficient
+    chunk_size = 10000
+    for i in range(0, total_rows, chunk_size):
+        chunk_df = clean_df.slice(i, chunk_size)
+        
+        # Async append handles encoding, just pass clean dicts
+        batch_dicts = []
+        for row in chunk_df.to_dicts():
+            batch_dicts.append({k: v for k, v in row.items() if v is not None})
+        
+        if batch_dicts:
+            await async_append_jsonl(temp_file, batch_dicts)
 
-    return clean_lf
+    context.log.info(f"Artist index built at {temp_file}. Moving to {final_file}...")
+
+    # 4. Move to Final Destination
+    if await asyncio.to_thread(temp_file.exists):
+        await asyncio.to_thread(shutil.move, str(temp_file), str(final_file))
+
+    return MaterializeResult(
+        metadata={
+            "row_count": total_rows,
+            "path": str(final_file),
+            "sparse_json": True
+        }
+    )

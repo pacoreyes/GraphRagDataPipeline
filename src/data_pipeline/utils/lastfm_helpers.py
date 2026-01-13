@@ -7,7 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-import hashlib
 from typing import Any, Optional
 from pathlib import Path
 
@@ -17,17 +16,16 @@ from data_pipeline.utils.network_helpers import (
     make_async_request_with_retries,
     AsyncClient,
 )
-from data_pipeline.utils.io_helpers import async_read_json_file, async_write_json_file
-
-
-def get_cache_key(text: str) -> str:
-    """Creates a SHA256 hash of a string to use as a cache key."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+from data_pipeline.utils.io_helpers import (
+    async_read_json_file, 
+    async_write_json_file, 
+    generate_cache_key
+)
 
 
 async def _async_cache_lastfm_data(key: str, data: dict[str, Any], cache_dir: Path) -> None:
     """Helper function to cache Last.fm data asynchronously."""
-    cache_key = get_cache_key(key.lower())
+    cache_key = generate_cache_key(key.lower())
     cache_file = cache_dir / f"{cache_key}.json"
     await async_write_json_file(cache_file, data)
 
@@ -50,7 +48,7 @@ async def async_fetch_lastfm_data_with_cache(
         context.log.warning("Last.fm API key or URL not provided. Skipping fetch.")
         return None
 
-    cache_key_str = get_cache_key(cache_key_source.lower())
+    cache_key_str = generate_cache_key(cache_key_source.lower())
     cache_file = cache_dir / f"{cache_key_str}.json"
 
     # 1. Check Cache
