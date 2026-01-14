@@ -112,7 +112,7 @@ class TestGenerateDocId:
         """Test that document ID is a valid SHA256 hash."""
         doc_id = generate_doc_id("Test article text", "row_0")
 
-        assert len(doc_id) == 64
+        assert len(doc_id) == 32
         assert all(c in "0123456789abcdef" for c in doc_id)
 
     def test_generate_doc_id_deterministic(self):

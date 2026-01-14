@@ -139,7 +139,6 @@ class Settings(BaseSettings):
         self.LAST_FM_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "last_fm"
         self.MUSICBRAINZ_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "musicbrainz"
         self.DATASETS_DIRPATH = self.DATA_DIR / "datasets"
-        # self.TEMP_DIRPATH = self.DATA_DIR / ".temp"
         self.VECTOR_DB_DIRPATH = self.DATA_DIR / "vector_db"
 
         # Create directories if they don't exist
@@ -149,7 +148,6 @@ class Settings(BaseSettings):
             self.LAST_FM_CACHE_DIRPATH,
             self.MUSICBRAINZ_CACHE_DIRPATH,
             self.DATASETS_DIRPATH,
-            # self.TEMP_DIRPATH,
             self.VECTOR_DB_DIRPATH,
         ]
         for directory in dirs_to_create:
@@ -172,8 +170,7 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    # api_key: str
-    # database_url: str
+    NOMIC_API_KEY: str = None
     debug_mode: bool = False  # Default value
 
 

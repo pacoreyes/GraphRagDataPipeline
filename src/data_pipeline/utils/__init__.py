@@ -5,3 +5,5 @@ from . import wikidata_helpers
 from . import wikipedia_helpers
 from . import neo4j_helpers
 from . import lastfm_helpers
+from . import chroma_helpers
+from . import musicbrainz_helpers
