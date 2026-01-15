@@ -23,7 +23,6 @@ def main() -> None:
     # Configuration
     db_path = settings.VECTOR_DB_DIRPATH
     collection_name = settings.DEFAULT_COLLECTION_NAME
-    query_text = "How many albums did Depeche Mode release?"
     n_results = 5
 
     print(f"Connecting to ChromaDB at {db_path}...")
@@ -34,44 +33,60 @@ def main() -> None:
         print(f"Error initializing DB: {e}")
         return
 
-    print(f"\nQuerying for: '{query_text}'")
-    print("-" * 30)
+    print("\n--- Interactive Query Mode ---")
+    print("Type your query and press Enter. Type 'exit' or 'quit' to stop.\n")
 
-    # Perform query
-    # Note: embed_query adds the required "search_query:" prefix internally
-    query_embedding = emb_fn.embed_query(query_text)
-    
-    results = collection.query(
-        query_embeddings=query_embedding,
-        n_results=n_results,
-        include=["documents", "metadatas", "distances"]
-    )
+    while True:
+        try:
+            query_text = input("Query: ").strip()
+            if not query_text:
+                continue
+            if query_text.lower() in ["exit", "quit"]:
+                print("Goodbye!")
+                break
 
-    if not results or not results.get("ids") or not results["ids"][0]:
-        print("No results found.")
-        return
+            print(f"\nSearching for: '{query_text}'")
+            print("-" * 30)
 
-    print("\nResults (sorted by distance - lower is better):")
-    print("-" * 30)
-    
-    # Iterate through the first query result list
-    ids = results["ids"][0]
-    metadatas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(ids)
-    distances = results["distances"][0] if results.get("distances") else ["N/A"] * len(ids)
-    documents = results["documents"][0] if results.get("documents") else ["N/A"] * len(ids)
+            # Perform query
+            query_embedding = emb_fn.embed_query(query_text)
+            
+            results = collection.query(
+                query_embeddings=query_embedding,
+                n_results=n_results,
+                include=["documents", "metadatas", "distances"]
+            )
 
-    for i, doc_id in enumerate(ids):
-        meta = metadatas[i] or {}
-        dist = distances[i]
-        snippet = documents[i][:200].replace("\n", " ") + "..."
+            if not results or not results.get("ids") or not results["ids"][0]:
+                print("No results found.")
+                continue
 
-        print(f"Result {i + 1}:")
-        print(f"  - ID:       {doc_id}")
-        print(f"  - Title:    {meta.get('title', 'N/A')}")
-        print(f"  - Artist:   {meta.get('artist_name', 'N/A')}")
-        print(f"  - Distance: {dist:.4f}" if isinstance(dist, float) else f"  - Distance: {dist}")
-        print(f"  - Snippet:  {snippet}")
-        print("-" * 30)
+            print("\nResults (sorted by distance - lower is better):")
+            print("-" * 30)
+            
+            # Iterate through the first query result list
+            ids = results["ids"][0]
+            metadatas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(ids)
+            distances = results["distances"][0] if results.get("distances") else ["N/A"] * len(ids)
+            documents = results["documents"][0] if results.get("documents") else ["N/A"] * len(ids)
+
+            for i, doc_id in enumerate(ids):
+                meta = metadatas[i] or {}
+                dist = distances[i]
+                snippet = documents[i][:200].replace("\n", " ") + "..."
+
+                print(f"Result {i + 1}:")
+                print(f"  - ID:       {doc_id}")
+                print(f"  - Title:    {meta.get('title', 'N/A')}")
+                print(f"  - Artist:   {meta.get('artist_name', 'N/A')}")
+                print(f"  - Distance: {dist:.4f}" if isinstance(dist, float) else f"  - Distance: {dist}")
+                print(f"  - Snippet:  {snippet}")
+                print("-" * 30)
+            print() # Extra newline for readability
+
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting...")
+            break
 
 
 if __name__ == "__main__":

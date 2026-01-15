@@ -1,2 +1,2 @@
 from . import query_embeddings
-from . import generate_embeddings_vis
+from . import generate_embedding_vis

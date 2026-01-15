@@ -12,14 +12,13 @@ dependencies = [
     "tqdm",  # Progress bars
     "ftfy", # Text cleaning
     "langchain-text-splitters",  # Text splitter used in embeddings
-    "chromadb>=0.6.0",  #  Chroma, vector database
+    "chromadb>=0.6.0",  # Chroma, vector database
     "torch",  # PyTorch, deep learning library
     "transformers",  # HuggingFace transformers library
     "einops",  # For tensor operations
     "nomic",  # Embedding model (Nomic AI)
     "neo4j",  # Neo4j graph database driver
     "dagster_gcp",  # Dagster integration with GCP  # MusicBrainz API client
-    # "musicbrainzngs",  #
     "curl-cffi>=0.14.0",  #
     "sentence_transformers"  #
 ]

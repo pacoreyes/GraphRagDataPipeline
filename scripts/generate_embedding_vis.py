@@ -61,7 +61,8 @@ def main() -> None:
         print("Warning: NOMIC_API_KEY not found in settings. Visualization upload may fail.")
 
     collection_name = settings.DEFAULT_COLLECTION_NAME
-    project_name = "GraphRAG Electronic Music Visualization"
+    project_name = "GraphRAG: Embedding Visualization of Electronic Music"
+    description = "Embedding part of a GraphRAG system combined with knowledge graph"
 
     # 2. Connect using helper
     try:
@@ -91,12 +92,13 @@ def main() -> None:
     try:
         project = atlas.map_data(
             data=metadata,
+            description=description,
             embeddings=embeddings,
             identifier=project_name,
             id_field="id",
             topic_model=NomicTopicOptions(
                 build_topic_model=True,
-                topic_label_field="artist_name",
+                topic_label_field="genres",
             ),
         )
         print("\nSUCCESS: Interactive Nomic map created!")
