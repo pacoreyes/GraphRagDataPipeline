@@ -151,6 +151,11 @@ def check_vector_db_retrieval(context: AssetCheckExecutionContext, chromadb: Chr
             doc_snippet = results["documents"][0][0][:100] if has_results and results.get("documents") else "N/A"
             dist = results["distances"][0][0] if has_results and results.get("distances") else "N/A"
             
+            if has_results:
+                context.log.info(f"Query 'Depeche Mode' successful. Found match: '{doc_snippet}...' (Distance: {dist})")
+            else:
+                context.log.warning("Query 'Depeche Mode' returned no results.")
+
             return AssetCheckResult(
                 passed=has_results,
                 metadata={
