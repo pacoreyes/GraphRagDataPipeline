@@ -60,20 +60,20 @@ class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
             self._model.half()
         self._model.eval()
 
-    def __call__(self, docs: Documents) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generates embeddings for documents.
 
         Documents are expected to already contain the 'search_document:' prefix.
 
         Args:
-            docs: List of document strings to embed.
+            input: List of document strings to embed.
 
         Returns:
             List of embedding vectors.
         """
         embeddings = self._model.encode(
-            docs,
+            input,
             convert_to_numpy=True,
             show_progress_bar=False,
             normalize_embeddings=True,
@@ -81,23 +81,23 @@ class NomicEmbeddingFunction(EmbeddingFunction[Documents]):
         # tolist() converts numpy array to list of floats, which matches Embeddings type alias
         return cast(Embeddings, embeddings.tolist())
 
-    def embed_query(self, query_text: Union[Documents, str]) -> Embeddings:
+    def embed_query(self, input: Union[Documents, str]) -> Embeddings:
         """
         Generates embedding for a search query.
 
         Adds the 'search_query:' prefix required by Nomic for retrieval.
 
         Args:
-            query_text: Search query string or list of strings.
+            input: Search query string or list of strings.
 
         Returns:
             Embedding vector for the query.
         """
         # Handle single string input which is common for query embedding
-        if isinstance(query_text, str):
-            texts = [query_text]
+        if isinstance(input, str):
+            texts = [input]
         else:
-            texts = query_text
+            texts = input
 
         prefixed = [f"search_query: {t}" for t in texts]
         

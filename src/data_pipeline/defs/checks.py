@@ -8,7 +8,7 @@
 # -----------------------------------------------------------
 
 import polars as pl
-from dagster import AssetCheckResult, asset_check, AssetExecutionContext
+from dagster import AssetCheckResult, asset_check, AssetCheckExecutionContext
 
 from data_pipeline.defs.resources import ChromaDBResource
 from data_pipeline.utils.chroma_helpers import NomicEmbeddingFunction, get_device
@@ -25,11 +25,6 @@ def check_artist_index_integrity(artist_index: pl.LazyFrame):
     ]).collect().to_dicts()[0]
 
     # Check for duplicates: Count rows where count > 1 group by all columns
-    # Note: Checking duplicates on all columns might be expensive if columns are many/large.
-    # Assuming 'artist_uri' should be unique primary key for this index?
-    # The original check used `is_duplicated()` on the whole frame.
-    # We will replicate strict "all columns" duplicate check.
-    
     dup_check = (
         artist_index.group_by(artist_index.collect_schema().names())
         .len()
@@ -128,7 +123,7 @@ def check_genres_quality(genres: pl.LazyFrame):
 
 
 @asset_check(asset="vector_db")
-def check_vector_db_retrieval(context: AssetExecutionContext, chromadb: ChromaDBResource):
+def check_vector_db_retrieval(context: AssetCheckExecutionContext, chromadb: ChromaDBResource):
     """
     Verifies that the vector database is searchable by querying for 'Depeche Mode'.
     """

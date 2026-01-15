@@ -369,7 +369,7 @@ To enable semantic search, the processed text chunks are indexed in **ChromaDB**
 
 The `ingest_vector_db` asset reads from `wikipedia_articles.jsonl`, generates embeddings using the Nomic model with automatic GPU/MPS acceleration, and upserts them into the vector store. This allows for natural language queries like "Which electronic artists were influenced by 80s synth-pop?".
 
-![Embedding in ChromaDB](docs/docs/nomic_embedding_visualization.png)
+![Embedding in ChromaDB](docs/nomic_embedding_visualization.png)
 
 ---
 
