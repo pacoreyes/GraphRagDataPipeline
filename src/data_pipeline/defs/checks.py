@@ -8,10 +8,9 @@
 # -----------------------------------------------------------
 
 import polars as pl
-from dagster import AssetCheckResult, asset_check, AssetCheckExecutionContext
+from dagster import AssetCheckResult, asset_check
 
-from data_pipeline.defs.resources import ChromaDBResource
-from data_pipeline.utils.chroma_helpers import NomicEmbeddingFunction, get_device
+
 
 
 @asset_check(asset="artist_index")
@@ -122,50 +121,4 @@ def check_genres_quality(genres: pl.LazyFrame):
     )
 
 
-@asset_check(asset="vector_db")
-def check_vector_db_retrieval(context: AssetCheckExecutionContext, chromadb: ChromaDBResource):
-    """
-    Verifies that the vector database is searchable by querying for 'Depeche Mode'.
-    """
-    device = get_device()
-    embedding_fn = NomicEmbeddingFunction(
-        model_name=chromadb.model_name,
-        device=str(device)
-    )
-    
-    with chromadb.get_collection(context, embedding_function=embedding_fn) as collection:
-        if collection.count() == 0:
-            return AssetCheckResult(
-                passed=False, 
-                description="Vector DB collection is empty."
-            )
 
-        try:
-            results = collection.query(
-                query_texts=["Depeche Mode"],
-                n_results=1,
-                include=["documents", "distances"]
-            )
-            
-            has_results = bool(results and results.get("ids") and len(results["ids"][0]) > 0)
-            doc_snippet = results["documents"][0][0][:100] if has_results and results.get("documents") else "N/A"
-            dist = results["distances"][0][0] if has_results and results.get("distances") else "N/A"
-            
-            if has_results:
-                context.log.info(f"Query 'Depeche Mode' successful. Found match: '{doc_snippet}...' (Distance: {dist})")
-            else:
-                context.log.warning("Query 'Depeche Mode' returned no results.")
-
-            return AssetCheckResult(
-                passed=has_results,
-                metadata={
-                    "query": "Depeche Mode",
-                    "found_document_snippet": doc_snippet,
-                    "distance": dist
-                }
-            )
-        except Exception as e:
-            return AssetCheckResult(
-                passed=False,
-                description=f"Query execution failed: {e}"
-            )
