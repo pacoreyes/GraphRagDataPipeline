@@ -53,13 +53,11 @@ async def test_extract_tracks_success(
 ):
     """
     Test that extract_tracks returns a list of Track objects.
-
-    Note: Provides 2 releases because the asset has a temporary `head(height // 2)` limiter.
     """
-    # 1. Setup Input Data (2 rows needed due to temporary solution in asset)
+    # 1. Setup Input Data (1 row needed)
     releases_df = pl.DataFrame({
-        "id": ["rg-123", "rg-456"],
-        "title": ["Test Album", "Another Album"]
+        "id": ["rg-123"],
+        "title": ["Test Album"]
     }).lazy()
 
     # 2. Setup Mock Return Values
@@ -118,12 +116,10 @@ async def test_extract_tracks_no_best_release(
 ):
     """
     Test that releases without a best release are skipped (no tracks returned).
-
-    Note: Provides 2 releases because the asset has a temporary `head(height // 2)` limiter.
     """
     releases_df = pl.DataFrame({
-        "id": ["rg-456", "rg-789"],
-        "title": ["Album Without Tracks", "Another Album"]
+        "id": ["rg-456"],
+        "title": ["Album Without Tracks"]
     }).lazy()
 
     mock_fetch_releases.return_value = []

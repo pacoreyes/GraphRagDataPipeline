@@ -130,7 +130,13 @@ async def build_artist_index_by_decade(
 ) -> pl.LazyFrame:
     """
     Extracts artist data for a specific decade (partition).
-    Returns a Polars LazyFrame.
+
+    Args:
+        context: Dagster execution context for logging and partition retrieval.
+        wikidata: Wikidata resource for API access.
+
+    Returns:
+        A Polars LazyFrame containing extracted artist data.
     """
     decade = context.partition_key
     start_year, end_year = DECADES_TO_EXTRACT[decade]
@@ -167,8 +173,16 @@ def build_artist_index(
     build_artist_index_by_decade: pl.LazyFrame
 ) -> pl.LazyFrame:
     """
-    Merges all decade-specific artist DataFrames into a single one,
-    then performs deduplication and cleaning using Polars.
+    Merges all decade-specific artist DataFrames into a single one.
+
+    Performs deduplication and cleaning using Polars.
+
+    Args:
+        context: Dagster execution context for logging.
+        build_artist_index_by_decade: Merged LazyFrame from all partition partitions.
+
+    Returns:
+        A cleaned and deduplicated Polars LazyFrame.
     """
     context.log.info("Preprocessing artist index.")
 

@@ -23,14 +23,39 @@ class BasePolarsIOManager(ConfigurableIOManager):
     base_dir: str
     extension: str
 
-    def handle_output(self, context: OutputContext, obj: Any):
+    def handle_output(self, context: OutputContext, obj: Any) -> None:
+        """
+        Saves output to storage.
+
+        Args:
+            context: Dagster output context.
+            obj: The object to save.
+        """
         raise NotImplementedError("This is a base class. Use a concrete subclass.")
 
     def load_input(self, context: InputContext) -> Any:
+        """
+        Loads input from storage.
+
+        Args:
+            context: Dagster input context.
+
+        Returns:
+            The loaded object.
+        """
         raise NotImplementedError("This is a base class. Use a concrete subclass.")
 
     def _get_path(self, context: Union[InputContext, OutputContext], partition_key: Optional[str] = None) -> Path:
-        """Determines the file path based on the asset key and partition."""
+        """
+        Determines the file path based on the asset key and partition.
+
+        Args:
+            context: Dagster I/O context.
+            partition_key: Optional partition key.
+
+        Returns:
+            A Path object pointing to the file.
+        """
         asset_name = context.asset_key.path[-1]
         
         pk = partition_key
@@ -51,12 +76,19 @@ class BasePolarsIOManager(ConfigurableIOManager):
 class PolarsParquetIOManager(BasePolarsIOManager):
     """
     I/O Manager that saves and loads DataFrames as Parquet files.
+
     Optimized for performance and compatibility with data viewers.
     """
     extension: str = "parquet"
 
-    def handle_output(self, context: OutputContext, obj: Any):
-        """Saves output to a Parquet file."""
+    def handle_output(self, context: OutputContext, obj: Any) -> None:
+        """
+        Saves output to a Parquet file.
+
+        Args:
+            context: Dagster output context.
+            obj: The object (DataFrame, LazyFrame, or list) to save.
+        """
         path = self._get_path(context)
         path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = path.with_suffix(".tmp")
@@ -88,7 +120,15 @@ class PolarsParquetIOManager(BasePolarsIOManager):
         })
 
     def load_input(self, context: InputContext) -> pl.LazyFrame:
-        """Loads data as a Polars LazyFrame from Parquet."""
+        """
+        Loads data as a Polars LazyFrame from Parquet.
+
+        Args:
+            context: Dagster input context.
+
+        Returns:
+            The loaded LazyFrame.
+        """
         if context.has_asset_partitions:
             if not context.has_partition_key:
                 partition_keys = context.asset_partition_keys
@@ -103,13 +143,18 @@ class PolarsParquetIOManager(BasePolarsIOManager):
 class PolarsJSONLIOManager(BasePolarsIOManager):
     """
     I/O Manager that saves and loads DataFrames and Iterators as JSONL files.
+
     Supports sparse JSON output and O(1) memory streaming.
     """
     extension: str = "jsonl"
 
-    def handle_output(self, context: OutputContext, obj: Any):
+    def handle_output(self, context: OutputContext, obj: Any) -> None:
         """
         Saves the output to a JSONL file sparsely.
+
+        Args:
+            context: Dagster output context.
+            obj: The object to save.
         """
         path = self._get_path(context)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +212,15 @@ class PolarsJSONLIOManager(BasePolarsIOManager):
         })
 
     def load_input(self, context: InputContext) -> pl.LazyFrame:
-        """Loads data as a Polars LazyFrame from JSONL."""
+        """
+        Loads data as a Polars LazyFrame from JSONL.
+
+        Args:
+            context: Dagster input context.
+
+        Returns:
+            The loaded LazyFrame.
+        """
         if context.has_asset_partitions:
             if not context.has_partition_key:
                 partition_keys = context.asset_partition_keys

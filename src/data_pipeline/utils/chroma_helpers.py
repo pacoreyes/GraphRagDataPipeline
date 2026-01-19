@@ -129,6 +129,15 @@ def generate_doc_id(article_text: str, row_hash: str) -> str:
 def get_chroma_client(db_path: Path) -> Client:
     """
     Returns a PersistentClient for the given database path.
+
+    Args:
+        db_path: Path to the ChromaDB storage directory.
+
+    Returns:
+        A ChromaDB Client instance.
+
+    Raises:
+        FileNotFoundError: If the database path does not exist.
     """
     if not db_path.exists():
         raise FileNotFoundError(f"Database path '{db_path}' does not exist.")
@@ -143,9 +152,17 @@ def get_collection_with_embedding(
 ) -> tuple[Collection, NomicEmbeddingFunction]:
     """
     Retrieves a collection with the initialized Nomic embedding function.
-    
+
+    Args:
+        client: ChromaDB Client instance.
+        collection_name: Name of the collection to retrieve.
+        model_name: Name of the embedding model to use.
+
     Returns:
-        tuple: (Collection, NomicEmbeddingFunction)
+        A tuple containing the Collection and its NomicEmbeddingFunction.
+
+    Raises:
+        ValueError: If the collection is not found.
     """
     device = get_device()
     print(f"Initializing embedding model on {device}...")

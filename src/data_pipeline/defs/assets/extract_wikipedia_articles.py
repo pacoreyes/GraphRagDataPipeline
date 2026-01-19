@@ -45,9 +45,18 @@ async def extract_wikipedia_articles(
     artist_index: pl.LazyFrame
 ) -> list[list[Article]]:
     """
-    Orchestrates the fetching, cleaning, chunking, and enrichment of Wikipedia articles
-    for all validated artists in the pipeline.
-    Returns a list of batches (lists of Article objects).
+    Orchestrates the fetching, cleaning, chunking, and enrichment of Wikipedia articles for all validated artists in the pipeline.
+
+    Args:
+        context: Dagster execution context for logging.
+        wikidata: Wikidata resource for API access.
+        wikipedia: Wikipedia resource for API access.
+        artists: Polars LazyFrame containing enriched artist data.
+        genres: Polars LazyFrame containing genre data.
+        artist_index: Polars LazyFrame containing the initial artist index.
+
+    Returns:
+        A list of batches (lists of Article objects).
     """
     context.log.info("Loading validated artists, genres, and artist index from inputs.")
 

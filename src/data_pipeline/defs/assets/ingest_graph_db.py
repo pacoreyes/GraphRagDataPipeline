@@ -23,6 +23,10 @@ from data_pipeline.defs.resources import Neo4jResource
 def _create_indexes(driver: Driver, context: AssetExecutionContext) -> None:
     """
     Creates necessary indexes in Neo4j to optimize query performance.
+
+    Args:
+        driver: Neo4j Driver instance.
+        context: Dagster execution context for logging.
     """
     context.log.info("Creating indexes...")
     
@@ -65,6 +69,18 @@ def ingest_graph_db(
 ) -> MaterializeResult:
     """
     Dagster asset that ingests music data into the Neo4j database.
+
+    Args:
+        context: Dagster execution context for logging.
+        neo4j: Neo4j resource for database access.
+        artists: Polars LazyFrame containing artist data.
+        releases: Polars LazyFrame containing release data.
+        tracks: Polars LazyFrame containing track data.
+        genres: Polars LazyFrame containing genre data.
+        countries: Polars LazyFrame containing country data.
+
+    Returns:
+        MaterializeResult with ingestion metadata.
     """
     batch_size = settings.GRAPH_DB_INGESTION_BATCH_SIZE
 
@@ -318,6 +334,11 @@ def ingest_graph_db(
 def _validate_graph_counts(driver: Driver, context: AssetExecutionContext, expected_counts: dict[str, int]) -> None:
     """
     Validates that the number of nodes in the graph matches the expected counts.
+
+    Args:
+        driver: Neo4j Driver instance.
+        context: Dagster execution context for logging.
+        expected_counts: Dictionary mapping node labels to their expected counts.
     """
     context.log.info("Validating graph node counts...")
     

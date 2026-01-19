@@ -51,6 +51,12 @@ LATIN_REGEX = re.compile(r"^[\u0000-\u007F\u0080-\u00FF\u0100-\u017F\u0180-\u024
 def _is_latin_name(name: Optional[str]) -> bool:
     """
     Checks if the name consists only of Latin characters, numbers, and common symbols.
+
+    Args:
+        name: The artist name to check.
+
+    Returns:
+        True if the name is Latin-based, False otherwise.
     """
     if not name:
         return False
@@ -60,12 +66,20 @@ def _is_latin_name(name: Optional[str]) -> bool:
 def _validate_artist_data(wikidata_info: dict[str, Any], country_label: Optional[str]) -> Optional[str]:
     """
     Centralized validation logic for an artist.
+
     Returns the MBID if valid (Latin Check assumed passed upstream), else None.
     
     Criteria:
     1. Must have English Wikipedia Article.
     2. Must have MusicBrainz ID (MBID).
     3. Must have a resolved Country Label.
+
+    Args:
+        wikidata_info: Dictionary containing Wikidata entity data.
+        country_label: Resolved label for the artist's country.
+
+    Returns:
+        The MusicBrainz ID if valid, otherwise None.
     """
     # 1. Wikipedia Check
     if not extract_wikidata_wikipedia_url(wikidata_info):
@@ -91,7 +105,17 @@ async def _enrich_artist_batch(
 ) -> list[Artist]:
     """
     Enriches a batch of artists with Wikidata and Last.fm data.
+
     Contains Music-Domain specific mapping logic.
+
+    Args:
+        artist_batch: List of artist dictionaries to enrich.
+        context: Dagster execution context for logging.
+        lastfm: Last.fm resource for API access.
+        client: Async HTTP client for Wikidata requests.
+
+    Returns:
+        List of enriched Artist model instances.
     """
     qids_map = {}
     clean_qids = []
@@ -246,7 +270,15 @@ async def extract_artists(
 ) -> list[Artist]:
     """
     Enriches all artists from the merged index.
-    Returns a list of enriched Artist objects.
+
+    Args:
+        context: Dagster execution context for logging.
+        wikidata: Wikidata resource for API access.
+        lastfm: Last.fm resource for API access.
+        artist_index: Polars LazyFrame containing the initial artist index.
+
+    Returns:
+        A list of enriched Artist objects.
     """
     context.log.info("Starting artist enrichment for full index.")
 

@@ -32,8 +32,16 @@ async def extract_releases(
 ) -> list[Release]:
     """
     Retrieves all filtered release groups (Albums/Singles) for each artist from MusicBrainz.
+
     Uses the 'mbid' from the artist dataset.
-    Returns a list of Release objects.
+
+    Args:
+        context: Dagster execution context for logging.
+        musicbrainz: MusicBrainz resource for API access.
+        artists: Polars LazyFrame containing enriched artist data.
+
+    Returns:
+        A list of Release model instances.
     """
     context.log.info("Starting releases extraction from MusicBrainz.")
 

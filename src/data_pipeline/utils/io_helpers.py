@@ -20,6 +20,12 @@ JSONDecodeError = msgspec.DecodeError
 async def async_read_json_file(path: Path) -> Optional[Any]:
     """
     Reads and decodes a JSON file asynchronously using msgspec.
+
+    Args:
+        path: Path to the JSON file.
+
+    Returns:
+        The decoded data, or None if the file does not exist or decoding fails.
     """
     if not await asyncio.to_thread(path.exists):
         return None
@@ -38,7 +44,12 @@ async def async_read_json_file(path: Path) -> Optional[Any]:
 async def async_write_json_file(path: Path, data: Any) -> None:
     """
     Encodes and writes data to a JSON file asynchronously using msgspec.
+
     Ensures parent directories exist.
+
+    Args:
+        path: Path to the JSON file to write.
+        data: Data to be JSON-encoded and written.
     """
     await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
 
@@ -52,6 +63,12 @@ async def async_write_json_file(path: Path, data: Any) -> None:
 async def async_read_text_file(path: Path) -> Optional[str]:
     """
     Reads a text file asynchronously.
+
+    Args:
+        path: Path to the text file.
+
+    Returns:
+        The file content as a string, or None if the file does not exist or on error.
     """
     if not await asyncio.to_thread(path.exists):
         return None
@@ -69,7 +86,12 @@ async def async_read_text_file(path: Path) -> Optional[str]:
 async def async_write_text_file(path: Path, content: str) -> None:
     """
     Writes content to a text file asynchronously.
+
     Ensures parent directories exist.
+
+    Args:
+        path: Path to the text file to write.
+        content: String content to write.
     """
     await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
 
@@ -81,12 +103,26 @@ async def async_write_text_file(path: Path, content: str) -> None:
 
 
 def generate_cache_key(text: str) -> str:
-    """Creates a SHA256 hash of a string to use as a cache key."""
+    """
+    Creates a SHA256 hash of a string to use as a cache key.
+
+    Args:
+        text: Input string to hash.
+
+    Returns:
+        SHA256 hex digest.
+    """
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def decode_json(data: bytes) -> Any:
     """
     Decodes JSON bytes using msgspec.
+
+    Args:
+        data: JSON bytes to decode.
+
+    Returns:
+        The decoded data.
     """
     return msgspec.json.decode(data)

@@ -32,11 +32,19 @@ async def extract_tracks(
 ) -> list[Track]:
     """
     Retrieves all tracks for each release (Release Group) in the releases dataset from MusicBrainz.
+
     Strategy:
     1. Fetch all releases for the Release Group.
     2. Pick the earliest "Official" release.
     3. Fetch tracks for that specific Release.
-    Returns a list of Track objects.
+
+    Args:
+        context: Dagster execution context for logging.
+        musicbrainz: MusicBrainz resource for API access.
+        releases: Polars LazyFrame containing release data.
+
+    Returns:
+        A list of Track model instances.
     """
     context.log.info("Starting tracks extraction from MusicBrainz.")
 

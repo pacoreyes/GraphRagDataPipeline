@@ -30,8 +30,21 @@ async def fetch_artist_release_groups_async(
 ) -> list[dict[str, Any]]:
     """
     Fetches all release groups for an artist from MusicBrainz.
+
     Handles pagination automatically. Implements local JSON caching.
     Uses AsyncClient and exponential backoff retries.
+
+    Args:
+        context: Dagster execution context for logging.
+        artist_mbid: MusicBrainz ID of the artist.
+        client: Async HTTP client to use for requests.
+        cache_dirpath: Path to the local cache directory.
+        api_url: Base URL of the MusicBrainz API.
+        headers: HTTP headers for the request.
+        rate_limit_delay: Delay between requests in seconds. Defaults to 1.0.
+
+    Returns:
+        List of release group dictionaries.
     """
     cache_file = cache_dirpath / f"{artist_mbid}_release.json"
     all_release_groups = []
@@ -95,6 +108,18 @@ async def fetch_releases_for_group_async(
 ) -> list[dict[str, Any]]:
     """
     Fetches the list of releases associated with a Release Group.
+
+    Args:
+        context: Dagster execution context for logging.
+        release_group_mbid: MusicBrainz ID of the release group.
+        client: Async HTTP client to use for requests.
+        cache_dirpath: Path to the local cache directory.
+        api_url: Base URL of the MusicBrainz API.
+        headers: HTTP headers for the request.
+        rate_limit_delay: Delay between requests in seconds. Defaults to 1.0.
+
+    Returns:
+        List of release dictionaries.
     """
     cache_file = cache_dirpath / f"{release_group_mbid}_releases.json"
 
@@ -141,6 +166,18 @@ async def fetch_tracks_for_release_async(
 ) -> list[dict[str, Any]]:
     """
     Fetches the tracklist for a specific Release MBID.
+
+    Args:
+        context: Dagster execution context for logging.
+        release_mbid: MusicBrainz ID of the release.
+        client: Async HTTP client to use for requests.
+        cache_dirpath: Path to the local cache directory.
+        api_url: Base URL of the MusicBrainz API.
+        headers: HTTP headers for the request.
+        rate_limit_delay: Delay between requests in seconds. Defaults to 1.0.
+
+    Returns:
+        List of track dictionaries.
     """
     cache_file = cache_dirpath / f"{release_mbid}_tracks.json"
     

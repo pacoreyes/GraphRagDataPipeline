@@ -131,7 +131,15 @@ class Settings(BaseSettings):
     #  AUTO-CREATION DIRS
     # ==============================================================================
     @model_validator(mode='after')
-    def _compute_and_create_paths(self):
+    def _compute_and_create_paths(self) -> "Settings":
+        """
+        Computes derived paths and creates necessary directories.
+
+        Also constructs the User-Agent string and default headers.
+
+        Returns:
+            The Settings instance (self).
+        """
         # Assign directory values
         self.WIKIPEDIA_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "wikipedia"
         self.WIKIDATA_CACHE_DIRPATH = self.DATA_DIR / ".cache" / "wikidata"

@@ -12,8 +12,16 @@ from dagster import AssetCheckResult, asset_check
 
 
 @asset_check(asset="artist_index")
-def check_artist_index_integrity(artist_index: pl.LazyFrame):
-    """Checks that the artist index has no null IDs or names and no duplicates."""
+def check_artist_index_integrity(artist_index: pl.LazyFrame) -> AssetCheckResult:
+    """
+    Checks that the artist index has no null IDs or names and no duplicates.
+
+    Args:
+        artist_index: Polars LazyFrame of the artist index.
+
+    Returns:
+        AssetCheckResult indicating if the integrity check passed.
+    """
     # Compute stats lazily
     stats = artist_index.select([
         pl.col("artist_uri").null_count().alias("null_ids"),
@@ -46,8 +54,16 @@ def check_artist_index_integrity(artist_index: pl.LazyFrame):
 
 
 @asset_check(asset="artists")
-def check_artists_completeness(artists: pl.LazyFrame):
-    """Checks that enriched artists have at least some genres or tags assigned."""
+def check_artists_completeness(artists: pl.LazyFrame) -> AssetCheckResult:
+    """
+    Checks that enriched artists have at least some genres or tags assigned.
+
+    Args:
+        artists: Polars LazyFrame of enriched artists.
+
+    Returns:
+        AssetCheckResult indicating if the completeness ratio is acceptable.
+    """
     # We use select with aggregation to get counts in one go
     stats = artists.select([
         pl.len().alias("total"),
@@ -71,8 +87,16 @@ def check_artists_completeness(artists: pl.LazyFrame):
 
 
 @asset_check(asset="releases")
-def check_releases_per_artist(releases: pl.LazyFrame):
-    """Checks that we have a reasonable average of releases per artist."""
+def check_releases_per_artist(releases: pl.LazyFrame) -> AssetCheckResult:
+    """
+    Checks that we have a reasonable average of releases per artist.
+
+    Args:
+        releases: Polars LazyFrame of releases.
+
+    Returns:
+        AssetCheckResult with the average releases per artist.
+    """
     stats = releases.select([
         pl.len().alias("count"),
         pl.col("artist_id").n_unique().alias("unique_artists")
@@ -93,8 +117,16 @@ def check_releases_per_artist(releases: pl.LazyFrame):
 
 
 @asset_check(asset="tracks")
-def check_tracks_schema(tracks: pl.LazyFrame):
-    """Checks that tracks have titles and valid album links."""
+def check_tracks_schema(tracks: pl.LazyFrame) -> AssetCheckResult:
+    """
+    Checks that tracks have titles and valid album links.
+
+    Args:
+        tracks: Polars LazyFrame of tracks.
+
+    Returns:
+        AssetCheckResult indicating if the schema requirements are met.
+    """
     stats = tracks.select([
         pl.col("title").null_count().alias("null_titles"),
         pl.col("album_id").null_count().alias("null_albums")
@@ -110,8 +142,16 @@ def check_tracks_schema(tracks: pl.LazyFrame):
 
 
 @asset_check(asset="genres")
-def check_genres_quality(genres: pl.LazyFrame):
-    """Checks that genres have names and a reasonable amount of metadata."""
+def check_genres_quality(genres: pl.LazyFrame) -> AssetCheckResult:
+    """
+    Checks that genres have names and a reasonable amount of metadata.
+
+    Args:
+        genres: Polars LazyFrame of genres.
+
+    Returns:
+        AssetCheckResult indicating if genre quality is acceptable.
+    """
     null_names = genres.select(pl.col("name").null_count()).collect().item()
     return AssetCheckResult(
         passed=bool(null_names == 0),

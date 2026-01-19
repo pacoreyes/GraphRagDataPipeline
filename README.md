@@ -21,7 +21,7 @@ This data pipeline orchestrates data ingestion from multiple sources to build a 
   - **Wikidata API** (Artists & Genres—using SPARQL & Action API)
   - **Last.fm API** (Similar Artists & Tags)
   - **MusicBrainz API** (Releases & Tracks)
-* **unstructured Data**
+* **Unstructured Data**
   - **Wikipedia API** (Articles about Artists and Genres)
 
 The goal is to prepare unstructured data (Wikipedia articles of musicians, bands, and artists) and split it into chunks enriched with structured metadata. This prepares the data for a hybrid search approach:
@@ -370,6 +370,36 @@ erDiagram
 - `(Release)-[:PERFORMED_BY]->(Artist)`
 - `(Genre)-[:SUBGENRE_OF]->(Genre)`: Enables hierarchical graph traversal.
 
+#### Indexes
+
+The graph database uses two types of indexes for query optimization:
+
+**Property Indexes** (single-property lookups):
+
+| Index Name | Label | Property |
+|------------|-------|----------|
+| `artist_id_idx` | Artist | id |
+| `artist_name_idx` | Artist | name |
+| `release_id_idx` | Release | id |
+| `genre_id_idx` | Genre | id |
+| `genre_name_idx` | Genre | name |
+| `country_id_idx` | Country | id |
+| `country_name_idx` | Country | name |
+
+**Fulltext Indexes** (multi-property text search):
+
+| Index Name | Label | Properties |
+|------------|-------|------------|
+| `artist_fulltext_idx` | Artist | name, aliases |
+| `genre_fulltext_idx` | Genre | name, aliases |
+| `release_fulltext_idx` | Release | title, tracks |
+
+Fulltext indexes enable queries like:
+```cypher
+CALL db.index.fulltext.queryNodes("artist_fulltext_idx", "Kraftwerk") YIELD node
+RETURN node.name, node.aliases
+```
+
 **Dataset Statistics:**
 - **Articles:** 4,679 processed.
     - 29,979 chunks (documents)
@@ -380,33 +410,39 @@ erDiagram
     - 93,132 Releases
 - **Edges:** 123,527.
 
-### 3. Vector Database (ChromaDB)
+### 3. Vector Database: Semantic Search (ChromaDB)
 
-#### Vector Schema
+**Content**: 29,979 documents about 4,679 artists embedded with model `nomic-ai/nomic-embed-text-v1.5` with rich metadata.
 
-* Article: Raw text enriched with context from flattened metadata
-* Metadata
-- * title: str
-- * artist_name: str
-- * aliases: list 
-- * tags: list (optional)
-- * similar_artists: list (optional)
-- * genres: list (optional)
-- * inception_year: int (optional)
-- * country: str
-- * wikipedia_url: str
-- * wikidata_uri: str
-- * chunk_index: int
-- * total_chunks: int
+#### Document Structure
 
-To enable semantic search, the processed text chunks are indexed in **ChromaDB**.
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  article (str)                                                      │
+│  └── Raw text enriched with context from flattened metadata         │
+│                                                                     │
+│  metadata (dict)                                                    │
+│  ├── title: str                                                     │
+│  ├── artist_name: str                                               │
+│  ├── aliases: list[str]                                             │
+│  ├── tags: list[str] (optional)                                     │
+│  ├── similar_artists: list[str] (optional)                          │
+│  ├── genres: list[str] (optional)                                   │
+│  ├── inception_year: int (optional)                                 │
+│  ├── country: str                                                   │
+│  ├── wikipedia_url: str                                             │
+│  ├── wikidata_uri: str                                              │
+│  ├── chunk_index: int                                               │
+│  └── total_chunks: int                                              │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 - **Collection Name:** `music_rag_collection`
-- **Embedding Model:** `nomic-embed-text-v1.5` (via Nomic AI)
+- **Embedding Model:** `nomic-embed-text-v1.5` (Nomic AI)
 - **Distance Metric:** Cosine Similarity
 - **Device Support:** Automatic detection of CUDA, MPS (Apple Silicon), or CPU
 
-The `ingest_vector_db` asset reads from `wikipedia_articles.jsonl`, generates embeddings using the Nomic model with automatic GPU/MPS acceleration, and upserts them into the vector store. This allows for natural language queries like "Which electronic artists were influenced by 80s synth-pop?".
+The `ingest_vector_db` asset reads from `wikipedia_articles.jsonl`, generates embeddings with automatic GPU/MPS acceleration, and upserts them into the vector store.
 
 ![Embedding in ChromaDB](docs/nomic_embedding_visualization.png)
 
@@ -440,6 +476,19 @@ For the RAG dataset, we use **sparse JSON** to minimize storage:
 {"id": "Q123_chunk_1", "metadata": {"title": "Daft Punk", "genres": ["House"]}}
 # NOT: {"id": "...", "metadata": {"title": "...", "genres": [...], "aliases": null, "tags": null}}
 ```
+
+### Auto-Generated Polars Schemas
+
+Domain models generate Polars-compatible schemas automatically:
+
+```python
+# In models.py
+RELEASE_SCHEMA = _generate_polars_schema(Release)
+TRACK_SCHEMA = _generate_polars_schema(Track)
+COUNTRY_SCHEMA = _generate_polars_schema(Country)
+```
+
+This ensures type consistency between msgspec Structs and Polars DataFrames without manual schema duplication.
 
 ### Resource Factory Pattern
 
@@ -566,6 +615,18 @@ graph_rag_data_pipeline_1/
 │           ├── neo4j_helpers.py
 │           └── chroma_helpers.py
 ├── tests/                          # Mirrors src/ structure
+│   └── data_pipeline/
+│       ├── defs/
+│       │   ├── assets/
+│       │   │   └── test_extract_tracks.py
+│       │   ├── test_checks.py
+│       │   ├── test_io_managers.py
+│       │   ├── test_partitions.py
+│       │   └── test_resources.py
+│       └── utils/
+│           ├── test_chroma_helpers.py
+│           ├── test_lastfm_helpers.py
+│           └── test_network_helpers.py
 ├── scripts/                        # Standalone CLI utilities
 ├── data_volume/                    # Local data & caches
 │   ├── .cache/                     # API response caches

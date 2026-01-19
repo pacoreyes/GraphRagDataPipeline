@@ -27,8 +27,15 @@ async def extract_countries(
     artists: pl.LazyFrame
 ) -> list[Country]:
     """
-    Extracts unique countries from the enriched artists dataset and 
-    resolves their Wikidata QIDs.
+    Extracts unique countries from the enriched artists dataset and resolves their Wikidata QIDs.
+
+    Args:
+        context: Dagster execution context for logging.
+        wikidata: Wikidata resource for API access.
+        artists: Polars LazyFrame containing enriched artist data.
+
+    Returns:
+        A list of Country model instances.
     """
     context.log.info("Extracting unique countries from artists.")
 

@@ -138,15 +138,17 @@ async def yield_batches_concurrently(
 ) -> AsyncIterable[R]:
     """
     Processes a list of items in batches concurrently and yields results as they complete.
+
     Args:
         items: List of items to process.
         batch_size: Number of items per batch.
         processor_fn: Async function that takes a batch and a client, returning a list of results.
         concurrency_limit: Max number of concurrent batches.
-        description: Progress bar description.
-        timeout: Timeout for the httpx client.
+        description: Progress bar description. Defaults to "Processing Batches".
+        timeout: Timeout for the httpx client. Defaults to 60.
         client: Optional existing client to reuse.
         impersonate: Browser fingerprint to impersonate (default: "chrome").
+
     Yields:
         Lists of results from the processed batches.
     """

@@ -96,7 +96,14 @@ class Article(msgspec.Struct, kw_only=True, omit_defaults=True):
 def _to_polars_dtype(py_type: Any) -> pl.DataType | type[pl.DataType]:
     """
     Maps a Python/msgspec type annotation to a Polars DataType.
+
     Handles Optional[...] and list[...] recursively.
+
+    Args:
+        py_type: The Python type or type annotation to map.
+
+    Returns:
+        The corresponding Polars DataType.
     """
     origin = get_origin(py_type)
     args = get_args(py_type)
@@ -132,6 +139,12 @@ def _to_polars_dtype(py_type: Any) -> pl.DataType | type[pl.DataType]:
 def _generate_polars_schema(model_cls: type[msgspec.Struct]) -> dict[str, pl.DataType]:
     """
     Generates a Polars schema dictionary from a msgspec.Struct class.
+
+    Args:
+        model_cls: The msgspec.Struct class to generate a schema for.
+
+    Returns:
+        A dictionary mapping field names to Polars DataTypes.
     """
     schema = {}
     # msgspec structs store field info in __annotations__

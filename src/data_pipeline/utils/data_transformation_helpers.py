@@ -31,6 +31,15 @@ def normalize_and_clean_text(text_or_expr: Union[str, pl.Expr]) -> Union[str, pl
     1. Repair encoding (ftfy)
     2. Normalize Unicode (NFKC)
     3. Sanitize (Regex: fix quotes, newlines, whitespace)
+
+    Args:
+        text_or_expr: Input string or Polars expression to clean.
+
+    Returns:
+        The cleaned string or Polars expression.
+
+    Raises:
+        TypeError: If the input is neither a string nor a Polars expression.
     """
     
     # --- Python String Implementation ---
@@ -86,6 +95,15 @@ def deduplicate_by_priority(
     
     Sorts the frame by `sort_col`, then iteratively applies unique constraints
     on `unique_cols` keeping the first occurrence (highest priority).
+
+    Args:
+        df: Input Polars DataFrame or LazyFrame.
+        sort_col: Column name to sort by for priority.
+        unique_cols: List of column names to ensure uniqueness.
+        descending: Whether to sort in descending order. Defaults to False.
+
+    Returns:
+        A deduplicated LazyFrame.
     """
     if isinstance(df, pl.DataFrame):
         lf = df.lazy()
@@ -103,9 +121,17 @@ def deduplicate_by_priority(
 def format_list_natural_language(items: Optional[Sequence[Any]]) -> str:
     """
     Formats a list of strings into a natural language string with Oxford comma.
-    e.g. ['A', 'B', 'C'] -> "A, B, and C"
-         ['A', 'B'] -> "A and B"
-         ['A'] -> "A"
+
+    Example:
+        ['A', 'B', 'C'] -> "A, B, and C"
+        ['A', 'B'] -> "A and B"
+        ['A'] -> "A"
+
+    Args:
+        items: Sequence of items to format.
+
+    Returns:
+        A naturally formatted string.
     """
     if not items:
         return ""

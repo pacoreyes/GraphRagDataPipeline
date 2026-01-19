@@ -36,9 +36,15 @@ async def extract_genres(
     artists: pl.LazyFrame
 ) -> pl.LazyFrame:
     """
-    Extracts all unique music genre IDs from the artists dataset,
-    fetches their English labels, aliases, and parents from Wikidata.
-    Returns a Polars LazyFrame.
+    Extracts all unique music genre IDs from the artists dataset, fetches their English labels, aliases, and parents from Wikidata.
+
+    Args:
+        context: Dagster execution context for logging.
+        wikidata: Wikidata resource for API access.
+        artists: Polars LazyFrame containing enriched artist data.
+
+    Returns:
+        A Polars LazyFrame containing Genre data.
     """
     context.log.info("Starting genre extraction from artists.")
 

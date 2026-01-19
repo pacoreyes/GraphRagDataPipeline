@@ -19,13 +19,20 @@ from data_pipeline.utils.network_helpers import (
 )
 from data_pipeline.utils.io_helpers import (
     async_read_json_file, 
-    async_write_json_file, 
+    async_write_json_file,
     generate_cache_key
 )
 
 
 async def _async_cache_lastfm_data(key: str, data: dict[str, Any], cache_dir: Path) -> None:
-    """Helper function to cache Last.fm data asynchronously."""
+    """
+    Helper function to cache Last.fm data asynchronously.
+
+    Args:
+        key: Source key for generating the cache filename.
+        data: Data dictionary to cache.
+        cache_dir: Path to the cache directory.
+    """
     cache_key = generate_cache_key(key.lower())
     cache_file = cache_dir / f"{cache_key}.json"
     await async_write_json_file(cache_file, data)
@@ -44,6 +51,20 @@ async def async_fetch_lastfm_data_with_cache(
 ) -> Optional[dict[str, Any]]:
     """
     Generic Last.fm API fetcher with local file caching.
+
+    Args:
+        context: Dagster execution context for logging.
+        params: Dictionary of API parameters.
+        cache_key_source: Source string for the cache key (e.g., MBID).
+        api_key: Last.fm API key.
+        api_url: Base URL of the Last.fm API.
+        cache_dir: Path to the local cache directory.
+        client: Async HTTP client to use for requests.
+        timeout: Request timeout in seconds. Defaults to 60.
+        rate_limit_delay: Delay between requests in seconds. Defaults to 0.0.
+
+    Returns:
+        JSON response from the API, or None if the request failed.
     """
     if not all([api_key, api_url]):
         context.log.warning("Last.fm API key or URL not provided. Skipping fetch.")

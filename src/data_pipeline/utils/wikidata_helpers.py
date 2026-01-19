@@ -43,7 +43,22 @@ async def run_extraction_pipeline(
 ) -> list[dict[str, Any]]:
     """
     Internal async function to run the extraction pipeline using concurrent pagination.
-    Returns a list of processed records.
+
+    Args:
+        context: Dagster execution context for logging.
+        get_query_function: Function that returns a SPARQL query string.
+        record_processor: Function to process individual records from the API.
+        label: Descriptive label for the extraction task (for logging).
+        sparql_endpoint: URL of the SPARQL endpoint.
+        batch_size: Number of records to fetch per request.
+        concurrency_limit: Maximum number of concurrent requests.
+        timeout: Request timeout in seconds. Defaults to 60.
+        rate_limit_delay: Delay between requests in seconds. Defaults to 0.0.
+        client: Async HTTP client to use for requests.
+        **query_params: Additional parameters to pass to the query function.
+
+    Returns:
+        List of processed records.
     """
     current_offset = 0
     all_records = []
@@ -114,6 +129,18 @@ async def _fetch_sparql_query_async(
 ) -> list[dict[str, Any]]:
     """
     Executes a SPARQL query against the Wikidata endpoint with retries asynchronously.
+
+    Args:
+        context: Dagster execution context for logging.
+        query: SPARQL query string to execute.
+        sparql_endpoint: URL of the SPARQL endpoint.
+        headers: Optional HTTP headers for the request.
+        timeout: Request timeout in seconds. Defaults to 60.
+        rate_limit_delay: Delay between requests in seconds. Defaults to 0.0.
+        client: Async HTTP client to use for requests.
+
+    Returns:
+        List of result bindings from the SPARQL response.
     """
     try:
         response = await make_async_request_with_retries(
@@ -143,7 +170,16 @@ async def _fetch_sparql_query_async(
 
 
 def get_sparql_binding_value(data: dict[str, Any], key: str) -> Any:
-    """Extracts a simple value from a SPARQL result binding."""
+    """
+    Extracts a simple value from a SPARQL result binding.
+
+    Args:
+        data: A single binding dictionary from the SPARQL results.
+        key: The key to extract from the binding.
+
+    Returns:
+        The extracted value, or None if the key is not present.
+    """
     return (data.get(key) or {}).get("value")
 
 
@@ -164,7 +200,24 @@ async def async_fetch_wikidata_entities_batch(
 ) -> dict[str, Any]:
     """
     Fetches entity data for a batch of QIDs from the Wikidata API (wbgetentities).
+
     Implements a local file cache (one JSON per QID).
+
+    Args:
+        context: Dagster execution context for logging.
+        qids: List of Wikidata QIDs to fetch.
+        api_url: URL of the Wikidata Action API.
+        cache_dir: Path to the local cache directory.
+        languages: Preferred languages for the data. Defaults to None.
+        timeout: Request timeout in seconds. Defaults to 60.
+        rate_limit_delay: Delay between requests in seconds. Defaults to 0.0.
+        concurrency_limit: Maximum number of concurrent tasks. Defaults to 5.
+        action_batch_size: Number of entities to fetch per API call. Defaults to 50.
+        headers: Optional HTTP headers for the request.
+        client: Async HTTP client to use for requests.
+
+    Returns:
+        Dictionary mapping QIDs to their entity data.
     """
     if not qids:
         return {}
@@ -256,7 +309,23 @@ async def async_resolve_qids_to_labels(
     headers: Optional[dict[str, str]] = None,
     client: Optional[AsyncClient] = None,
 ) -> dict[str, str]:
-    """Resolves a list of QIDs to their labels."""
+    """
+    Resolves a list of QIDs to their labels.
+
+    Args:
+        context: Dagster execution context for logging.
+        qids: List of Wikidata QIDs to resolve.
+        api_url: URL of the Wikidata Action API.
+        cache_dir: Path to the local cache directory.
+        languages: Preferred languages for the labels.
+        timeout: Request timeout in seconds. Defaults to 60.
+        rate_limit_delay: Delay between requests in seconds. Defaults to 0.0.
+        headers: Optional HTTP headers for the request.
+        client: Async HTTP client to use for requests.
+
+    Returns:
+        Dictionary mapping QIDs to their resolved labels.
+    """
     entities = await async_fetch_wikidata_entities_batch(
         context,
         qids,
@@ -283,7 +352,16 @@ def extract_wikidata_label(
 ) -> Optional[str]:
     """
     Extracts the label for a given language.
+
     If the requested language is not found, tries the provided languages list.
+
+    Args:
+        entity_data: Raw Wikidata entity dictionary.
+        lang: Primary language to look for. Defaults to "en".
+        languages: List of fallback languages. Defaults to None.
+
+    Returns:
+        The extracted label, or None if not found.
     """
     labels = entity_data.get("labels") or {}
 
@@ -307,7 +385,16 @@ def extract_wikidata_aliases(
 ) -> list[str]:
     """
     Extracts aliases for a given language.
+
     If the requested language has no aliases, tries the provided languages list.
+
+    Args:
+        entity_data: Raw Wikidata entity dictionary.
+        lang: Primary language to look for. Defaults to "en".
+        languages: List of fallback languages. Defaults to None.
+
+    Returns:
+        List of alias strings.
     """
     all_aliases = entity_data.get("aliases") or {}
 
@@ -325,7 +412,16 @@ def extract_wikidata_aliases(
 
 
 def extract_wikidata_wikipedia_url(entity_data: dict[str, Any], lang: str = "en") -> Optional[str]:
-    """Extracts the Wikipedia URL for a given language (e.g., 'enwiki')."""
+    """
+    Extracts the Wikipedia URL for a given language (e.g., 'enwiki').
+
+    Args:
+        entity_data: Raw Wikidata entity dictionary.
+        lang: Language code for the Wikipedia site. Defaults to "en".
+
+    Returns:
+        The full Wikipedia URL, or None if not found.
+    """
     wiki_key = f"{lang}wiki"
     sitelinks = entity_data.get("sitelinks", {})
     if wiki_key in sitelinks:
@@ -341,7 +437,15 @@ def extract_wikidata_claim_value(
 ) -> Optional[Any]:
     """
     Extracts the first claim value for a property (e.g., 'P495').
+
     Handles 'wikibase-entityid' (returns ID) and simple strings.
+
+    Args:
+        entity_data: Raw Wikidata entity dictionary.
+        property_id: Wikidata property ID (e.g., 'P434').
+
+    Returns:
+        The first claim value, or None if not found.
     """
     claims = entity_data.get("claims", {})
     if property_id not in claims:
@@ -366,7 +470,16 @@ def extract_wikidata_claim_value(
 def extract_wikidata_claim_ids(
     entity_data: dict[str, Any], property_id: str
 ) -> list[str]:
-    """Extracts all claim values (IDs) for a property."""
+    """
+    Extracts all claim values (IDs) for a property.
+
+    Args:
+        entity_data: Raw Wikidata entity dictionary.
+        property_id: Wikidata property ID (e.g., 'P136').
+
+    Returns:
+        List of claim IDs.
+    """
     claims = entity_data.get("claims", {})
     if property_id not in claims:
         return []
@@ -396,7 +509,24 @@ async def async_resolve_labels_to_qids(
 ) -> dict[str, str]:
     """
     Resolves a list of labels (e.g., country names) to their Wikidata QIDs.
+
     Uses 'wbsearchentities' API action.
+
+    Args:
+        context: Dagster execution context for logging.
+        labels: List of labels to search for.
+        api_url: URL of the Wikidata Action API.
+        cache_dir: Path to the local cache directory.
+        entity_type: Type of entity to search for. Defaults to "item".
+        language: Language to perform the search in. Defaults to "en".
+        timeout: Request timeout in seconds. Defaults to 60.
+        rate_limit_delay: Delay between requests in seconds. Defaults to 0.0.
+        concurrency_limit: Maximum number of concurrent tasks. Defaults to 5.
+        headers: Optional HTTP headers for the request.
+        client: Async HTTP client to use for requests.
+
+    Returns:
+        Dictionary mapping labels to their resolved QIDs.
     """
     if not labels:
         return {}

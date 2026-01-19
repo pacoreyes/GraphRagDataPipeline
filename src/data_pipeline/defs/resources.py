@@ -31,7 +31,16 @@ class LastFmResource(ConfigurableResource):
     api_key: str
 
     @asynccontextmanager
-    async def get_client(self, context) -> AsyncGenerator[AsyncClient, None]:
+    async def get_client(self, context: Any) -> AsyncGenerator[AsyncClient, None]:
+        """
+        Yields an async Last.fm HTTP client.
+
+        Args:
+            context: Dagster execution context.
+
+        Yields:
+            An AsyncClient instance.
+        """
         context.log.debug(f"Initializing Last.fm client (Run ID: {context.run_id})")
         async with AsyncClient(
             headers={
@@ -54,7 +63,16 @@ class MusicBrainzResource(ConfigurableResource):
     cache_dir: str
 
     @asynccontextmanager
-    async def get_client(self, context) -> AsyncGenerator[AsyncClient, None]:
+    async def get_client(self, context: Any) -> AsyncGenerator[AsyncClient, None]:
+        """
+        Yields an async MusicBrainz HTTP client.
+
+        Args:
+            context: Dagster execution context.
+
+        Yields:
+            An AsyncClient instance.
+        """
         context.log.debug(f"Initializing MusicBrainz client (Run ID: {context.run_id})")
         async with AsyncClient(
             headers={
@@ -91,7 +109,7 @@ class ChromaDBResource(ConfigurableResource):
     @contextmanager
     def get_collection(
         self,
-        context,
+        context: Any,
         embedding_function: Any = None
     ) -> Generator[Collection, None, None]:
         """
@@ -127,7 +145,16 @@ class Neo4jResource(ConfigurableResource):
     password: str
 
     @contextmanager
-    def get_driver(self, context) -> Generator[Driver, None, None]:
+    def get_driver(self, context: Any) -> Generator[Driver, None, None]:
+        """
+        Yields a Neo4j Driver instance.
+
+        Args:
+            context: Dagster execution context.
+
+        Yields:
+            A Neo4j Driver instance.
+        """
         context.log.debug(f"Initializing Neo4j driver (Run ID: {context.run_id})")
         driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password))
         try:
@@ -149,7 +176,16 @@ class WikidataResource(ConfigurableResource):
     impersonate: str = "chrome"
 
     @asynccontextmanager
-    async def get_client(self, context) -> AsyncGenerator[AsyncClient, None]:
+    async def get_client(self, context: Any) -> AsyncGenerator[AsyncClient, None]:
+        """
+        Yields an async Wikidata HTTP client.
+
+        Args:
+            context: Dagster execution context.
+
+        Yields:
+            An AsyncClient instance.
+        """
         context.log.debug(f"Initializing Wikidata client (Run ID: {context.run_id})")
         async with AsyncClient(
             headers={
@@ -172,7 +208,16 @@ class WikipediaResource(ConfigurableResource):
     rate_limit_delay: float
 
     @asynccontextmanager
-    async def get_client(self, context) -> AsyncGenerator[AsyncClient, None]:
+    async def get_client(self, context: Any) -> AsyncGenerator[AsyncClient, None]:
+        """
+        Yields an async Wikipedia HTTP client.
+
+        Args:
+            context: Dagster execution context.
+
+        Yields:
+            An AsyncClient instance.
+        """
         context.log.debug(f"Initializing Wikipedia client (Run ID: {context.run_id})")
         async with AsyncClient(
             headers={

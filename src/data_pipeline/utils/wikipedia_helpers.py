@@ -35,7 +35,21 @@ async def async_fetch_wikipedia_article(
 ) -> Optional[str]:
     """
     Fetches the raw plain text of a Wikipedia article by its title, with caching.
+
     The QID is required to ensure consistent cache file naming (e.g., Q123.txt).
+
+    Args:
+        context: Dagster execution context for logging.
+        title: Wikipedia article title.
+        qid: Wikidata QID associated with the article.
+        api_url: URL of the Wikipedia Action API.
+        cache_dir: Path to the local cache directory.
+        headers: Optional HTTP headers for the request.
+        client: Async HTTP client to use for requests.
+        rate_limit_delay: Delay between requests in seconds. Defaults to 0.0.
+
+    Returns:
+        The raw plain text of the article, or None if not found or on error.
     """
     clean_title = urllib.parse.unquote(title).replace("_", " ")
     
