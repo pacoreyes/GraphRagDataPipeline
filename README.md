@@ -401,14 +401,14 @@ RETURN node.name, node.aliases
 ```
 
 **Dataset Statistics:**
-- **Articles:** 4,679 processed.
+- **Articles:** 4,681 processed.
     - 30,005 chunks (documents) 
 - **Nodes:** 98,677.
     - 112 countries
     - 754 genres
-    - 4679 artists
-    - 93,132 Releases
-- **Edges:** 123,527.
+    - 4681 artists
+    - 98,715 Releases
+- **Edges:** 123,574.
 
 ### 3. Vector Database: Semantic Search (ChromaDB)
 
