@@ -325,8 +325,6 @@ We process Wikipedia articles to create a high-quality corpus for Retrieval-Augm
 
 We construct a deterministic Knowledge Graph to map the relationships between the musical entities. This allows for precise multi-hop queries (e.g., "Find all sub-genres of 'House' that originated in 'France'").
 
-![Panel of Neo4j Aura](docs/neo4j_panel.png)
-
 #### Graph Schema
 ```mermaid
 erDiagram
