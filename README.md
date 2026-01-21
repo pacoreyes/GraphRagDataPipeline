@@ -1,6 +1,6 @@
 # GraphRAG - Part 1: Data Pipeline
 
-*Last update: January 19, 2026*
+*Last update: January 21, 2026*
 
 This repo is part of a larger project **GraphRAG** app, in which I show how the GraphRAG pattern works.
 
@@ -356,6 +356,7 @@ erDiagram
     Country {
         string id
         string name
+        string_list aliases
     }
 ```
 
@@ -363,7 +364,7 @@ erDiagram
 - **Artist:** The core entity (e.g., "Daft Punk").
 - **Release:** Major releases (Albums/Singles) linked to artists. Contains embedded track list as a property.
 - **Genre:** A hierarchical taxonomy of musical styles (e.g., "French House" -> "House" -> "Electronic").
-- **Country:** Geographic entities representing artist origin (e.g., "France", "Germany").
+- **Country:** Geographic entities representing artist origin (e.g., "France", "Germany"). Includes alternative names (aliases) for improved searchability.
 
 #### Edges (Relationships)
 - `(Artist)-[:PLAYS_GENRE]->(Genre)`

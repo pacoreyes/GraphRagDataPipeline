@@ -43,6 +43,7 @@ def _create_indexes(driver: Driver, context: AssetExecutionContext) -> None:
         "CREATE FULLTEXT INDEX artist_fulltext_idx IF NOT EXISTS FOR (n:Artist) ON EACH [n.name, n.aliases]",
         "CREATE FULLTEXT INDEX genre_fulltext_idx IF NOT EXISTS FOR (n:Genre) ON EACH [n.name, n.aliases]",
         "CREATE FULLTEXT INDEX release_fulltext_idx IF NOT EXISTS FOR (n:Release) ON EACH [n.title, n.tracks]",
+        "CREATE FULLTEXT INDEX country_fulltext_idx IF NOT EXISTS FOR (n:Country) ON EACH [n.name, n.aliases]",
     ]
 
     for cmd in index_commands:
@@ -126,7 +127,8 @@ def ingest_graph_db(
         UNWIND $batch AS row
         CREATE (:Country {
             id: row.id, 
-            name: row.name
+            name: row.name,
+            aliases: row.aliases
         });
         """
         # Materialize only Countries for processing

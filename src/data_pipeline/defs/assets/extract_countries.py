@@ -13,7 +13,11 @@ import polars as pl
 from dagster import asset, AssetExecutionContext
 
 from data_pipeline.models import Country
-from data_pipeline.utils.wikidata_helpers import async_resolve_labels_to_qids
+from data_pipeline.utils.wikidata_helpers import (
+    async_resolve_labels_to_qids, 
+    async_fetch_wikidata_entities_batch,
+    extract_wikidata_aliases
+)
 from data_pipeline.defs.resources import WikidataResource
 
 
@@ -62,11 +66,25 @@ async def extract_countries(
             rate_limit_delay=wikidata.rate_limit_delay,
             client=client
         )
+        
+        # 3. Fetch Aliases for resolved QIDs
+        resolved_qids = list(resolved_map.values())
+        entities_data = await async_fetch_wikidata_entities_batch(
+            context,
+            resolved_qids,
+            api_url=wikidata.api_url,
+            cache_dir=Path(wikidata.cache_dir),
+            timeout=wikidata.timeout,
+            rate_limit_delay=wikidata.rate_limit_delay,
+            client=client
+        )
 
-    # 3. Construct List of Country objects
+    # 4. Construct List of Country objects
     countries = []
     for name, qid in resolved_map.items():
-        countries.append(Country(id=qid, name=name))
+        entity = entities_data.get(qid, {})
+        aliases = extract_wikidata_aliases(entity)
+        countries.append(Country(id=qid, name=name, aliases=aliases or None))
 
     # Log unresolved
     unresolved = set(country_names) - set(resolved_map.keys())

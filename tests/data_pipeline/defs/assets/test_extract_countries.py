@@ -17,8 +17,10 @@ from data_pipeline.models import Country
 
 
 @pytest.mark.asyncio
+@patch("data_pipeline.defs.assets.extract_countries.extract_wikidata_aliases")
+@patch("data_pipeline.defs.assets.extract_countries.async_fetch_wikidata_entities_batch")
 @patch("data_pipeline.defs.assets.extract_countries.async_resolve_labels_to_qids")
-async def test_extract_countries(mock_resolve):
+async def test_extract_countries(mock_resolve, mock_fetch_entities, mock_extract_aliases):
     """
     Test the extract_countries asset.
     """
@@ -34,6 +36,26 @@ async def test_extract_countries(mock_resolve):
         "UK": "Q145",
         "Germany": "Q183"
     }
+
+    # Mock Fetch Entities (Aliases)
+    # We return a dummy dict structure; the extract_wikidata_aliases mock will handle the actual extraction logic
+    mock_fetch_entities.return_value = {
+        "Q30": {"id": "Q30", "labels": {"en": {"value": "United States"}}},
+        "Q145": {"id": "Q145", "labels": {"en": {"value": "United Kingdom"}}},
+        "Q183": {"id": "Q183", "labels": {"en": {"value": "Germany"}}}
+    }
+
+    # Mock Extract Aliases
+    # Side effect function to return different aliases based on the input entity
+    def side_effect(entity):
+        eid = entity.get("id")
+        if eid == "Q30":
+            return ["USA", "United States of America"]
+        elif eid == "Q145":
+            return ["Great Britain", "UK"]
+        return [] # Germany has no aliases in this test case
+
+    mock_extract_aliases.side_effect = side_effect
 
     # Mock Resource
     from contextlib import asynccontextmanager
@@ -69,12 +91,26 @@ async def test_extract_countries(mock_resolve):
     assert names == {"US", "UK", "Germany"}
     assert qids == {"Q30", "Q145", "Q183"}
     
+    # Verify aliases
+    us_country = next(c for c in result if c.id == "Q30")
+    assert us_country.aliases == ["USA", "United States of America"]
+
+    uk_country = next(c for c in result if c.id == "Q145")
+    assert uk_country.aliases == ["Great Britain", "UK"]
+
+    de_country = next(c for c in result if c.id == "Q183")
+    assert de_country.aliases is None
+    
     # Verify helper was called with unique non-empty names
     called_labels = mock_resolve.call_args[0][1]
     assert set(called_labels) == {"US", "UK", "Germany"}
     assert "" not in called_labels
     assert None not in called_labels
     
+    # Verify fetch entities was called with the resolved QIDs
+    called_qids = mock_fetch_entities.call_args[0][1]
+    assert set(called_qids) == {"Q30", "Q145", "Q183"}
+
     # Verify resource attributes were passed
     _, args, kwargs = mock_resolve.mock_calls[0]
     # args: (context, country_names)

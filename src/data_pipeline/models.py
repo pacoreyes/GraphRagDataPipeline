@@ -62,6 +62,7 @@ class Country(msgspec.Struct, kw_only=True, omit_defaults=True):
     """
     id: str  # Wikidata QID
     name: str
+    aliases: Optional[list[str]] = None
 
 
 class ArticleMetadata(msgspec.Struct, kw_only=True, omit_defaults=True):
