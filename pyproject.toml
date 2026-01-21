@@ -16,7 +16,7 @@ dependencies = [
     "chromadb>=0.6.0",  # Chroma, vector database
     "torch",  # PyTorch, deep learning library
     "transformers",  # HuggingFace transformers library
-    "einops",  # For tensor operations
+    "einops",  # For tensor operations, used by Chroma
     "nomic",  # Embedding model (Nomic AI)
     "neo4j",  # Neo4j graph database driver
     "dagster_gcp",  # Dagster integration with GCP  # MusicBrainz API client
