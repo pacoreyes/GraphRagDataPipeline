@@ -1,6 +1,6 @@
 # GraphRAG - Part 1: Data Pipeline
 
-*Last update: January 21, 2026*
+*Last update: January 26, 2026*
 
 This repo is part of a larger project **GraphRAG** app, in which I show how the GraphRAG pattern works.
 
@@ -84,10 +84,18 @@ This project implements a **strict separation of concerns** following Dagster's 
 │  │  └──────────────────┘  └────────────────┘  └─────────────────────┘       │
 │  │                                                                          │
 │  │  ┌────────────────────────────────────────────────────────────────────┐  │
-│  │  │  ┌─────────────────────┐                 ┌───────────────────┐     │  │
-│  │  │  │ extract_wikipedia   │                 │  ingest_vector_db │     │  │
-│  │  │  │ _articles.py        │────────────────▶│  .py (ChromaDB)   │     │  │
-│  │  │  └─────────────────────┘                 └───────────────────┘     │  │
+│  │  │  ┌─────────────────────┐                                          │  │
+│  │  │  │ extract_artists     │──┐                                       │  │
+│  │  │  │ _articles.py        │  │   ┌─────────────────────┐             │  │
+│  │  │  └─────────────────────┘  ├──▶│ merge_wikipedia     │             │  │
+│  │  │  ┌─────────────────────┐  │   │ _articles.py        │             │  │
+│  │  │  │ extract_genres      │──┘   └─────────┬───────────┘             │  │
+│  │  │  │ _articles.py        │                │                         │  │
+│  │  │  └─────────────────────┘                ▼                         │  │
+│  │  │                                ┌───────────────────┐              │  │
+│  │  │                                │  ingest_vector_db │              │  │
+│  │  │                                │  .py (ChromaDB)   │              │  │
+│  │  │                                └───────────────────┘              │  │
 │  │  │                                                                    │  │
 │  │  │  ┌───────────────────┐                                             │  │
 │  │  │  │  ingest_graph_db  │◀── artists, releases, tracks,               │  │
@@ -251,19 +259,22 @@ graph TD
     end
 
     subgraph "Stage 4: RAG Preparation"
-        D -->|Wikipedia URLs| K[extract_wikipedia_articles]
-        K -->|Clean & Chunk| L[Text Splitter]
-        L -->|Enrich Metadata| M[wikipedia_articles.jsonl]
+        D -->|Wikipedia URLs| K1[extract_artists_articles]
+        G -->|Wikipedia URLs| K2[extract_genres_articles]
+        K1 -->|Clean & Chunk| L1[Text Splitter]
+        K2 -->|Clean & Chunk| L2[Text Splitter]
+        L1 & L2 -->|Merge| M[merge_wikipedia_articles]
+        M --> N[wikipedia_articles.jsonl]
     end
 
     subgraph "Stage 5: Vector Ingestion"
-        M -->|Nomic Embeddings| N[ingest_vector_db]
-        N -->|Upsert| O[(ChromaDB)]
+        N -->|Nomic Embeddings| P[ingest_vector_db]
+        P -->|Upsert| Q[(ChromaDB)]
     end
 
     style A fill:#e1f5fe
     style J fill:#c8e6c9
-    style O fill:#fff3e0
+    style Q fill:#fff3e0
 ```
 
 ### Asset Dependency Graph
@@ -277,7 +288,9 @@ graph TD
 | `releases` | `artists` | `list[Release]` | Parquet |
 | `tracks` | `releases` | `list[Track]` | Parquet |
 | `countries` | `artists` | `list[Country]` | Parquet |
-| `wikipedia_articles` | `artists`, `genres`, `artist_index` | `list[list[Article]]` | JSONL |
+| `artists_articles` | `artists` | `list[Article]` | JSONL |
+| `genres_articles` | `genres` | `list[Article]` | JSONL |
+| `wikipedia_articles` | `artists_articles`, `genres_articles` | `pl.LazyFrame` | JSONL |
 | `graph_db` | `artists`, `releases`, `tracks`, `genres`, `countries` | `MaterializeResult` | None (sink) |
 | `vector_db` | `wikipedia_articles` | `MaterializeResult` | None (sink) |
 
@@ -396,6 +409,7 @@ The graph database uses two types of indexes for query optimization:
 | `artist_fulltext_idx` | Artist | name, aliases |
 | `genre_fulltext_idx` | Genre | name, aliases |
 | `release_fulltext_idx` | Release | title, tracks |
+| `country_fulltext_idx` | Country | name, aliases |
 
 Fulltext indexes enable queries like:
 ```cypher
@@ -596,11 +610,13 @@ graph_rag_data_pipeline_1/
 │       │   ├── assets/             # Business logic layer
 │       │   │   ├── build_artist_index.py
 │       │   │   ├── extract_artists.py
+│       │   │   ├── extract_artists_articles.py
 │       │   │   ├── extract_countries.py
 │       │   │   ├── extract_genres.py
+│       │   │   ├── extract_genres_articles.py
 │       │   │   ├── extract_releases.py
 │       │   │   ├── extract_tracks.py
-│       │   │   ├── extract_wikipedia_articles.py
+│       │   │   ├── merge_wikipedia_articles.py
 │       │   │   ├── ingest_graph_db.py
 │       │   │   └── ingest_vector_db.py
 │       │   ├── resources.py        # Connection factories
@@ -619,17 +635,34 @@ graph_rag_data_pipeline_1/
 │           └── chroma_helpers.py
 ├── tests/                          # Mirrors src/ structure
 │   └── data_pipeline/
+│       ├── test_settings.py
 │       ├── defs/
 │       │   ├── assets/
-│       │   │   └── test_extract_tracks.py
+│       │   │   ├── test_build_artist_index.py
+│       │   │   ├── test_extract_artist.py
+│       │   │   ├── test_extract_artists_articles.py
+│       │   │   ├── test_extract_countries.py
+│       │   │   ├── test_extract_genres.py
+│       │   │   ├── test_extract_genres_articles.py
+│       │   │   ├── test_extract_releases.py
+│       │   │   ├── test_extract_tracks.py
+│       │   │   ├── test_merge_wikipedia_articles.py
+│       │   │   ├── test_ingest_graph_db.py
+│       │   │   └── test_ingest_vector_db.py
 │       │   ├── test_checks.py
 │       │   ├── test_io_managers.py
 │       │   ├── test_partitions.py
 │       │   └── test_resources.py
 │       └── utils/
 │           ├── test_chroma_helpers.py
+│           ├── test_data_transformation_helpers.py
+│           ├── test_io_helpers.py
 │           ├── test_lastfm_helpers.py
-│           └── test_network_helpers.py
+│           ├── test_musicbrainz_helpers.py
+│           ├── test_neo4j_helpers.py
+│           ├── test_network_helpers.py
+│           ├── test_wikidata_helpers.py
+│           └── test_wikipedia_helpers.py
 ├── scripts/                        # Standalone CLI utilities
 ├── data_volume/                    # Local data & caches
 │   ├── .cache/                     # API response caches
