@@ -128,6 +128,23 @@ class Settings(BaseSettings):
     MIN_CONTENT_LENGTH: int = 30
 
     # ==============================================================================
+    #  COMMUNITY DETECTION SETTINGS
+    # ==============================================================================
+    # Leiden algorithm resolution parameters for hierarchical community detection
+    # Level 0: Fine-grained (higher resolution = smaller communities)
+    # Level 1: Medium
+    # Level 2: Coarse (lower resolution = larger communities)
+    LEIDEN_RESOLUTIONS: list[float] = [2.0, 0.5, 0.1]
+
+    # MLX LLM model for community summarization
+    MLX_MODEL_PATH: str = "mlx-community/Qwen2.5-14B-Instruct-4bit"
+    MLX_MAX_TOKENS: int = 400
+
+    # Community metadata limits for ChromaDB ingestion
+    COMMUNITY_MAX_MEMBER_IDS_IN_METADATA: int = 50
+    COMMUNITY_MAX_TAGS_IN_METADATA: int = 5
+
+    # ==============================================================================
     #  AUTO-CREATION DIRS
     # ==============================================================================
     @model_validator(mode='after')

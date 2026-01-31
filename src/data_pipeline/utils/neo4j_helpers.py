@@ -7,9 +7,21 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
+"""
+Neo4j and graph operations helpers.
+
+This module provides:
+- Neo4j query execution with retry logic
+- Database cleanup operations
+- Generic graph construction and community detection
+"""
+
 import time
+from collections import Counter
 from typing import Any, LiteralString, cast
 
+import igraph as ig
+import leidenalg
 from dagster import AssetExecutionContext
 from neo4j import Driver
 from neo4j.exceptions import ServiceUnavailable, SessionExpired
@@ -175,3 +187,104 @@ def clear_database(
     except Exception as e:
         context.log.error(f"Error during database cleanup: {e}")
         raise e
+
+
+# =============================================================================
+# Graph Construction and Community Detection
+# =============================================================================
+
+def build_igraph(
+    nodes: list[dict[str, Any]],
+    edges: list[tuple[str, str]],
+    node_id_key: str = "id",
+    node_attrs: list[str] | None = None,
+) -> tuple[ig.Graph, dict[str, int]]:
+    """
+    Builds an igraph Graph from node and edge data.
+
+    Args:
+        nodes: List of node dicts, each containing at least the node_id_key.
+        edges: List of (source_id, target_id) tuples.
+        node_id_key: Key in node dicts to use as node identifier.
+        node_attrs: Optional list of additional attribute keys to copy from nodes.
+
+    Returns:
+        Tuple of (graph, id_to_index mapping).
+    """
+    # Build ID to index mapping
+    id_to_idx = {node[node_id_key]: idx for idx, node in enumerate(nodes)}
+
+    # Convert edges to index pairs, filtering invalid edges
+    edge_indices = []
+    for source_id, target_id in edges:
+        if source_id in id_to_idx and target_id in id_to_idx:
+            edge_indices.append((id_to_idx[source_id], id_to_idx[target_id]))
+
+    # Create graph
+    g = ig.Graph(n=len(nodes), edges=edge_indices, directed=False)
+
+    # Set node IDs as vertex attribute
+    g.vs[node_id_key] = [node[node_id_key] for node in nodes]
+
+    # Copy additional node attributes if specified
+    if node_attrs:
+        for attr in node_attrs:
+            g.vs[attr] = [node.get(attr) for node in nodes]
+
+    return g, id_to_idx
+
+
+def run_leiden_multilevel(
+    graph: ig.Graph,
+    resolutions: list[float],
+    seed: int = 42,
+) -> list[list[int]]:
+    """
+    Runs Leiden community detection at multiple resolution levels.
+
+    Higher resolution values produce more (smaller) communities.
+    Lower resolution values produce fewer (larger) communities.
+
+    Args:
+        graph: igraph Graph object.
+        resolutions: List of resolution parameters (e.g., [2.0, 0.5, 0.1]).
+        seed: Random seed for reproducibility.
+
+    Returns:
+        List of membership lists, one per resolution level.
+        Each membership list maps vertex index to community ID.
+    """
+    memberships = []
+
+    for resolution in resolutions:
+        partition = leidenalg.find_partition(
+            graph,
+            leidenalg.RBConfigurationVertexPartition,
+            resolution_parameter=resolution,
+            seed=seed,
+        )
+        memberships.append(partition.membership)
+
+    return memberships
+
+
+def get_community_stats(membership: list[int]) -> dict[str, Any]:
+    """
+    Computes basic statistics about a community partition.
+
+    Args:
+        membership: List mapping vertex index to community ID.
+
+    Returns:
+        Dict with num_communities, sizes (sorted descending), and modularity info.
+    """
+    counts = Counter(membership)
+    sizes = sorted(counts.values(), reverse=True)
+
+    return {
+        "num_communities": len(counts),
+        "sizes": sizes,
+        "largest": sizes[0] if sizes else 0,
+        "smallest": sizes[-1] if sizes else 0,
+        "mean_size": sum(sizes) / len(sizes) if sizes else 0,
+    }

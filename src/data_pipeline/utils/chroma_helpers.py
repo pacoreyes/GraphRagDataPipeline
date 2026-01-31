@@ -18,8 +18,6 @@ from chromadb.api.models.Collection import Collection
 from chromadb import Documents, Embeddings, EmbeddingFunction
 from sentence_transformers import SentenceTransformer
 
-from data_pipeline.settings import settings
-
 
 def get_device() -> torch.device:
     """
@@ -148,7 +146,7 @@ def get_chroma_client(db_path: Path) -> Client:
 def get_collection_with_embedding(
     client: Client,
     collection_name: str,
-    model_name: str = settings.DEFAULT_EMBEDDINGS_MODEL_NAME
+    model_name: str,
 ) -> tuple[Collection, NomicEmbeddingFunction]:
     """
     Retrieves a collection with the initialized Nomic embedding function.

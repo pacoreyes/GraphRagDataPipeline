@@ -14,8 +14,11 @@ from neo4j.exceptions import ServiceUnavailable, SessionExpired
 
 from data_pipeline.utils.neo4j_helpers import (
     _execute_with_retry,
+    build_igraph,
     clear_database,
     execute_cypher,
+    get_community_stats,
+    run_leiden_multilevel,
 )
 
 
@@ -256,3 +259,155 @@ class TestClearDatabase:
             clear_database(mock_driver, mock_context)
 
         mock_context.log.error.assert_called_once()
+
+
+# =============================================================================
+# Graph Construction and Community Detection Tests
+# =============================================================================
+
+class TestBuildIgraph:
+    """Tests for build_igraph function."""
+
+    def test_build_igraph_basic(self):
+        """Test building a simple graph."""
+        nodes = [
+            {"id": "A", "name": "Node A"},
+            {"id": "B", "name": "Node B"},
+            {"id": "C", "name": "Node C"},
+        ]
+        edges = [("A", "B"), ("B", "C")]
+
+        graph, id_to_idx = build_igraph(nodes, edges)
+
+        assert graph.vcount() == 3
+        assert graph.ecount() == 2
+        assert id_to_idx == {"A": 0, "B": 1, "C": 2}
+
+    def test_build_igraph_with_node_attrs(self):
+        """Test building graph with additional node attributes."""
+        nodes = [
+            {"id": "A", "name": "Node A", "type": "artist"},
+            {"id": "B", "name": "Node B", "type": "genre"},
+        ]
+        edges = [("A", "B")]
+
+        graph, _ = build_igraph(nodes, edges, node_attrs=["name", "type"])
+
+        assert graph.vs[0]["name"] == "Node A"
+        assert graph.vs[0]["type"] == "artist"
+        assert graph.vs[1]["type"] == "genre"
+
+    def test_build_igraph_filters_invalid_edges(self):
+        """Test that edges with non-existent nodes are filtered."""
+        nodes = [
+            {"id": "A", "name": "Node A"},
+            {"id": "B", "name": "Node B"},
+        ]
+        edges = [("A", "B"), ("A", "C"), ("D", "B")]  # C and D don't exist
+
+        graph, _ = build_igraph(nodes, edges)
+
+        assert graph.vcount() == 2
+        assert graph.ecount() == 1  # Only A-B edge
+
+    def test_build_igraph_empty_graph(self):
+        """Test building an empty graph."""
+        graph, id_to_idx = build_igraph([], [])
+
+        assert graph.vcount() == 0
+        assert graph.ecount() == 0
+        assert id_to_idx == {}
+
+    def test_build_igraph_custom_id_key(self):
+        """Test building graph with custom ID key."""
+        nodes = [
+            {"wikidata_id": "Q1", "name": "Entity 1"},
+            {"wikidata_id": "Q2", "name": "Entity 2"},
+        ]
+        edges = [("Q1", "Q2")]
+
+        graph, id_to_idx = build_igraph(nodes, edges, node_id_key="wikidata_id")
+
+        assert id_to_idx == {"Q1": 0, "Q2": 1}
+        assert graph.vs[0]["wikidata_id"] == "Q1"
+
+
+class TestRunLeidenMultilevel:
+    """Tests for run_leiden_multilevel function."""
+
+    def test_run_leiden_single_resolution(self):
+        """Test Leiden with a single resolution level."""
+        nodes = [{"id": str(i)} for i in range(10)]
+        # Create a connected graph
+        edges = [(str(i), str(i + 1)) for i in range(9)]
+
+        graph, _ = build_igraph(nodes, edges)
+        memberships = run_leiden_multilevel(graph, [1.0])
+
+        assert len(memberships) == 1
+        assert len(memberships[0]) == 10  # One assignment per node
+
+    def test_run_leiden_multiple_resolutions(self):
+        """Test Leiden with multiple resolution levels."""
+        nodes = [{"id": str(i)} for i in range(20)]
+        # Create two clusters
+        edges = (
+            [(str(i), str(j)) for i in range(10) for j in range(i + 1, 10)]  # Cluster 1
+            + [(str(i), str(j)) for i in range(10, 20) for j in range(i + 1, 20)]  # Cluster 2
+            + [("5", "15")]  # Bridge
+        )
+
+        graph, _ = build_igraph(nodes, edges)
+        memberships = run_leiden_multilevel(graph, [2.0, 0.5, 0.1])
+
+        assert len(memberships) == 3
+        # Higher resolution should have more communities
+        assert len(set(memberships[0])) >= len(set(memberships[2]))
+
+    def test_run_leiden_deterministic_with_seed(self):
+        """Test that Leiden produces deterministic results with same seed."""
+        nodes = [{"id": str(i)} for i in range(10)]
+        edges = [(str(i), str((i + 1) % 10)) for i in range(10)]
+
+        graph, _ = build_igraph(nodes, edges)
+
+        memberships1 = run_leiden_multilevel(graph, [1.0], seed=42)
+        memberships2 = run_leiden_multilevel(graph, [1.0], seed=42)
+
+        assert memberships1 == memberships2
+
+
+class TestGetCommunityStats:
+    """Tests for get_community_stats function."""
+
+    def test_get_community_stats_basic(self):
+        """Test computing stats for a simple partition."""
+        membership = [0, 0, 0, 1, 1, 2]
+
+        stats = get_community_stats(membership)
+
+        assert stats["num_communities"] == 3
+        assert stats["largest"] == 3
+        assert stats["smallest"] == 1
+        assert stats["mean_size"] == 2.0
+        assert stats["sizes"] == [3, 2, 1]
+
+    def test_get_community_stats_single_community(self):
+        """Test stats with all nodes in one community."""
+        membership = [0, 0, 0, 0, 0]
+
+        stats = get_community_stats(membership)
+
+        assert stats["num_communities"] == 1
+        assert stats["largest"] == 5
+        assert stats["smallest"] == 5
+        assert stats["mean_size"] == 5.0
+
+    def test_get_community_stats_empty(self):
+        """Test stats with empty membership."""
+        stats = get_community_stats([])
+
+        assert stats["num_communities"] == 0
+        assert stats["largest"] == 0
+        assert stats["smallest"] == 0
+        assert stats["mean_size"] == 0

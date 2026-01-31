@@ -9,3 +9,6 @@ from . import extract_genres_articles
 from . import merge_wikipedia_articles
 from . import ingest_graph_db
 from . import ingest_vector_db
+from . import detect_communities
+from . import generate_community_summaries
+from . import ingest_community_summaries

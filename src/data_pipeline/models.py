@@ -97,6 +97,43 @@ class Article(msgspec.Struct, kw_only=True, omit_defaults=True):
     article: str
 
 
+# =============================================================================
+# Community Detection Models
+# =============================================================================
+
+class CommunityAssignment(msgspec.Struct, kw_only=True):
+    """
+    Represents a community assignment for an artist from Leiden detection.
+
+    Each artist is assigned to communities at multiple hierarchical levels.
+    """
+    artist_id: str
+    artist_name: str
+    community_L0: int  # Fine-grained community (high resolution)
+    community_L1: int  # Medium community
+    community_L2: int  # Coarse community (low resolution)
+
+
+class Community(msgspec.Struct, kw_only=True, omit_defaults=True):
+    """
+    Community with metadata and optional LLM-generated summary.
+
+    Used by both community_metadata (without name/summary) and
+    community_summaries (with name/summary) assets.
+    """
+    community_id: int
+    level: int  # 0, 1, or 2
+    entity_type: str = "community"  # For vector DB filtering
+    member_count: int
+    top_tags: list[str]
+    top_genres: list[str]
+    top_countries: list[str]
+    representative_artists: list[str]
+    member_ids: list[str]  # Wikidata QIDs of member artists
+    name: Optional[str] = None  # Human-readable name (e.g., "German Techno")
+    summary: Optional[str] = None  # LLM-generated description
+
+
 def _to_polars_dtype(py_type: Any) -> pl.DataType | type[pl.DataType]:
     """
     Maps a Python/msgspec type annotation to a Polars DataType.
@@ -161,3 +198,5 @@ def _generate_polars_schema(model_cls: type[msgspec.Struct]) -> dict[str, pl.Dat
 RELEASE_SCHEMA = _generate_polars_schema(Release)
 TRACK_SCHEMA = _generate_polars_schema(Track)
 COUNTRY_SCHEMA = _generate_polars_schema(Country)
+COMMUNITY_ASSIGNMENT_SCHEMA = _generate_polars_schema(CommunityAssignment)
+COMMUNITY_SCHEMA = _generate_polars_schema(Community)
